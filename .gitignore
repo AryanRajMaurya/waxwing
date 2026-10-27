@@ -1,0 +1,4 @@
+# The generated WAV from demo/make-demo.mjs is 4 MB and is not shipped;
+# the muxed demo.mp3 is.
+/tmp/
+*.wav

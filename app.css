@@ -1,0 +1,518 @@
+/* IZGIV — glass, warm ink, and one accent taken from the cover. */
+
+:root {
+  --bg: #0c0a09;
+  --bg-soft: #14110f;
+  --ink: #f5efe4;
+  --muted: #a79c8d;
+  --line: rgb(245 239 228 / 0.09);
+  --glass: rgb(255 255 255 / 0.045);
+  --glass-strong: rgb(255 255 255 / 0.08);
+  --accent: rgb(198 148 92);
+  --accent-soft: rgb(198 148 92 / 0.18);
+  --on-accent: #12100e;
+  --radius: 18px;
+  --shadow: 0 30px 80px rgb(0 0 0 / 0.45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The accent, bloomed behind everything. It follows the cover art. */
+.ambient {
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(45% 40% at 18% 12%, var(--accent-soft), transparent 70%),
+    radial-gradient(50% 45% at 82% 8%, rgb(255 255 255 / 0.05), transparent 70%),
+    radial-gradient(60% 50% at 60% 100%, var(--accent-soft), transparent 75%);
+  filter: blur(20px);
+  transition: background 900ms ease;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 26px;
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(18px);
+  background: rgb(12 10 9 / 0.55);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  transition: background 600ms ease;
+}
+
+.brand-name { font-weight: 700; letter-spacing: 0.26em; font-size: 13px; }
+.brand-tag { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
+
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+.field.search input {
+  width: 240px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 150ms, background 150ms;
+}
+
+.field.search input:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--glass-strong); }
+.field.search input::placeholder { color: var(--muted); }
+
+.btn {
+  padding: 9px 15px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms, filter 150ms, background 600ms;
+}
+
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(1px); }
+.btn.ghost { background: var(--glass); color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { background: var(--glass-strong); }
+
+.stage {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 22px;
+  padding: 22px 26px 12px;
+  min-height: 0;
+}
+
+.library-panel,
+.player-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--glass);
+  backdrop-filter: blur(22px);
+  box-shadow: var(--shadow);
+  min-height: 0;
+}
+
+.library-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-head h2 { margin: 0; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); font-size: 12px; }
+
+.empty { padding: 26px 20px; }
+.empty-title { margin: 0 0 6px; font-size: 16px; }
+.empty-body { margin: 0; color: var(--muted); font-size: 13px; max-width: 34ch; }
+
+.library { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
+
+.library-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-item:hover { background: var(--glass-strong); }
+.library-item[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.library-art {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: linear-gradient(140deg, var(--accent-soft), rgb(255 255 255 / 0.05));
+}
+
+.library-text { min-width: 0; }
+.library-title { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.library-artist { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.library-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.player-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 26px clamp(20px, 4vw, 56px) 16px;
+  overflow-y: auto;
+}
+
+/* Art and title sit in the middle of the panel; the visualiser keeps the
+   floor. Without this wrapper the whole column bunches at the top and the
+   tall screens show a dead half-panel under the title. */
+.stage-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  min-height: 0;
+}
+
+.art-wrap {
+  position: relative;
+  width: min(340px, 44vh);
+  aspect-ratio: 1;
+  flex: none;
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.5);
+  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Lyrics take vertical room, so the cover yields it. Without this the panel
+   is taller than the window and the top of the artwork is clipped. */
+body.has-lyrics .art-wrap { width: min(248px, 30vh); }
+body.has-lyrics .stage-center { gap: 14px; }
+
+.art { width: 100%; height: 100%; object-fit: cover; display: none; }
+.art.is-visible { display: block; }
+
+.art-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 20% 10%, var(--accent-soft), transparent 60%),
+    linear-gradient(160deg, #1b1714, #0e0c0b);
+  color: color-mix(in srgb, var(--accent) 70%, white);
+  font-size: clamp(28px, 5vw, 44px);
+  letter-spacing: 0.3em;
+  font-weight: 300;
+}
+
+.art-fallback.is-hidden { display: none; }
+
+.track-meta { text-align: center; max-width: 100%; }
+.track-meta h1 {
+  margin: 0;
+  font-size: clamp(20px, 3vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.track-meta p { margin: 6px 0 0; font-size: 13.5px; }
+
+.visualizer {
+  width: 100%;
+  height: 78px;
+  flex: none;
+  opacity: 0.9;
+}
+
+.lyrics {
+  width: min(620px, 100%);
+  max-height: 28vh;
+  overflow-y: auto;
+  mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent);
+  flex: none;
+  scrollbar-width: none;
+}
+
+.lyrics::-webkit-scrollbar { display: none; }
+
+.lyrics ol { list-style: none; margin: 0; padding: 20px 0; }
+.lyrics li {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 14px;
+  opacity: 0.62;
+  transition: color 200ms, opacity 200ms, transform 200ms;
+}
+.lyrics li.is-active {
+  color: var(--ink);
+  opacity: 1;
+  font-weight: 500;
+  transform: scale(1.04);
+  transform-origin: left center;
+}
+
+.transport {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 26px 18px;
+  border-top: 1px solid var(--line);
+  background: rgb(12 10 9 / 0.7);
+  backdrop-filter: blur(18px);
+}
+
+.transport-left, .transport-right { display: flex; align-items: center; gap: 6px; }
+
+.icon-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 150ms, background 150ms;
+}
+
+.icon-btn:hover { color: var(--ink); background: var(--glass); }
+.icon-btn[aria-pressed="true"], .icon-btn.is-on { color: var(--accent); }
+
+.play-btn {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 4px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  transition: transform 120ms, filter 150ms, background 600ms;
+}
+
+.play-btn:hover { filter: brightness(1.08); }
+.play-btn:active { transform: scale(0.97); }
+.play-btn .icon-pause { display: none; }
+body.is-playing .play-btn .icon-play { display: none; }
+body.is-playing .play-btn .icon-pause { display: block; }
+
+.badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+
+.transport-center { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
+
+/* The default range input has no fill, so a seek bar at 60% looks identical
+   to one at 0%. A gradient driven by --progress draws the played part; the
+   script updates the variable as the track moves. */
+.seek, .volume {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: transparent;
+  background-image: linear-gradient(
+    to right,
+    var(--accent) 0 var(--progress, 0%),
+    rgb(245 239 228 / 0.14) var(--progress, 0%) 100%
+  );
+  background-size: 100% 4px;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.seek { flex: 1; min-width: 0; height: 20px; }
+.volume { width: 92px; height: 20px; }
+
+.seek::-webkit-slider-thumb,
+.volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 0 0 3px rgb(0 0 0 / 0.25);
+  transition: transform 120ms;
+}
+
+.seek:hover::-webkit-slider-thumb,
+.volume:hover::-webkit-slider-thumb { transform: scale(1.15); }
+
+.seek::-moz-range-thumb,
+.volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Equalizer sheet */
+.eq-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 40px));
+  padding: 18px 22px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(18 15 13 / 0.92);
+  backdrop-filter: blur(26px);
+  box-shadow: var(--shadow);
+  z-index: 20;
+}
+
+.eq-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.eq-head h2 { margin: 0; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+.presets { display: flex; gap: 8px; margin-left: auto; }
+
+.chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover { color: var(--ink); background: var(--glass-strong); }
+
+.eq-sliders {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+  align-items: end;
+  height: 150px;
+}
+
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: 8px; height: 100%; justify-content: flex-end; }
+.eq-band input {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 6px;
+  height: 110px;
+  accent-color: var(--accent);
+}
+.eq-band span { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgb(18 15 13 / 0.95);
+  font-size: 13px;
+  z-index: 30;
+}
+
+/* A class selector beats the UA rule for [hidden], so every element that sets
+   `display` has to opt back out of it explicitly. Without this the error
+   overlay covers the app from the first paint. */
+.boot-error[hidden],
+.toast[hidden],
+.eq-panel[hidden],
+.lyrics[hidden],
+.badge[hidden] {
+  display: none;
+}
+
+.boot-error {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 40px;
+  background: var(--bg);
+  color: #ffb4a8;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  z-index: 50;
+}
+
+body.is-dragging::after {
+  content: "Drop to add";
+  position: fixed;
+  inset: 16px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 24px;
+  background: rgb(12 10 9 / 0.72);
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  z-index: 40;
+}
+
+@media (max-width: 900px) {
+  .stage { grid-template-columns: 1fr; grid-template-rows: minmax(120px, 34vh) minmax(0, 1fr); }
+  .brand-tag { display: none; }
+  .field.search input { width: 150px; }
+  .transport { grid-template-columns: auto 1fr; row-gap: 10px; }
+  .transport-right { grid-column: 1 / -1; justify-content: flex-end; }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "izgiv",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A browser player for the music already on your disk. No dependencies, no build step, no upload.",
+  "homepage": "https://aryanrajmaurya.github.io/izgiv/",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\"",
+    "serve": "python3 -m http.server 8000 --bind 127.0.0.1",
+    "demo": "node demo/make-demo.mjs /tmp/glass.wav"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

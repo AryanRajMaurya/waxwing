@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests and boot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Unit tests
+        run: npm test
+
+      # The unit tests cover the pure modules; they cannot tell you that the
+      # page boots. A browser can, and the page announces its own state in
+      # data-ready so this check needs no test framework.
+      - name: Boot the player in headless Chrome
+        run: |
+          set -euo pipefail
+          python3 -m http.server 8000 --bind 127.0.0.1 &
+          sleep 1
+
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          if [ -z "$chrome" ]; then
+            echo "no Chrome on this runner" >&2
+            exit 1
+          fi
+          echo "using $chrome"
+
+          mkdir -p out
+          "$chrome" --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+            --window-size=1440,900 --virtual-time-budget=8000 \
+            --screenshot=out/player.png \
+            --dump-dom http://127.0.0.1:8000/ > out/dom.html
+
+          echo "--- the page announced its state ---"
+          grep -o 'data-ready="[a-z]*"' out/dom.html | head -1
+          grep -q 'data-ready="ready"' out/dom.html
+
+          echo "--- the demo loaded ---"
+          grep -q 'library-title">Glass' out/dom.html
+          grep -q 'Glass' out/dom.html
+
+          test -s out/player.png
+          ls -lh out/player.png
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: player-screenshot
+          path: out/player.png
+          if-no-files-found: warn
