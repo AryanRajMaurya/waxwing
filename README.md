@@ -26,6 +26,13 @@ it.
 - **Plays the files you drop on it.** MP3, FLAC, OGG, Opus, M4A, WAV — whatever
   the browser can decode. The picker, drag-and-drop and a folder-sized drop all
   work.
+- **Plays YouTube, inside YouTube.** Press the *YouTube* button and paste a
+  link (or an id): the video plays in the art frame in YouTube's own embed,
+  joins the queue with local tracks, and its title and channel are fetched
+  from YouTube's oEmbed endpoint — no key involved. Honest limits: the audio
+  never leaves YouTube's player, so the equaliser and the spectrum (which work
+  by routing the sound through the Web Audio graph) don't apply to YouTube
+  tracks. Lyrics still follow the clock.
 - **Reads the tags, including the cover.** Title, artist, album, track, year
   and genre come out of the file, and the embedded picture becomes the artwork
   and the source of the accent colour. No tag? The filename is split into
@@ -65,6 +72,7 @@ Nothing is bundled. The modules are plain ES modules loaded by the browser:
 | `src/color.js` | Dominant colour from the cover, lifted into a readable accent |
 | `src/eq.js` | The ten filters, presets, and the preamp calculation |
 | `src/queue.js` | Play order, shuffle bag, repeat, previous/next |
+| `src/yt.js` | YouTube URLs → video id, the IFrame API contract |
 | `src/app.js` | The UI, the Web Audio graph and the playback loop |
 
 Three decisions worth knowing about:

@@ -24,6 +24,7 @@
         <input id="search" type="search" placeholder="Search title, artist, album" autocomplete="off" />
       </label>
       <button id="import-btn" class="btn">Add music</button>
+      <button id="yt-btn" class="btn ghost">YouTube</button>
       <button id="demo-btn" class="btn ghost">Play the demo</button>
       <input id="file-input" type="file" accept="audio/*,.lrc" multiple hidden />
     </div>
@@ -52,6 +53,10 @@
         <div class="art-wrap">
           <img id="art" class="art" alt="" />
           <div id="art-fallback" class="art-fallback" aria-hidden="true">IZGIV</div>
+          <!-- YouTube tracks play inside the art frame, in YouTube's own
+               embed. The audio never passes through this page, so the EQ and
+               the visualiser are local-file features only. -->
+          <div id="yt-host" hidden></div>
         </div>
 
         <div class="track-meta">
