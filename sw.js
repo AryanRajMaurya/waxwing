@@ -7,7 +7,7 @@
  * the user's files, not this app's.
  */
 
-const CACHE = 'izgiv-v4';
+const CACHE = 'izgiv-v5';
 const SHELL = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const SHELL = [
   './src/lrc.js',
   './src/color.js',
   './src/eq.js',
+  './src/yt.js',
   './demo/demo.mp3',
   './demo/demo.lrc',
 ];
