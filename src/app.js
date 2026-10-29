@@ -1,5 +1,5 @@
 /**
- * IZGIV, in the browser.
+ * Waxwing, in the browser.
  *
  * The original was an Electron app: a Node sidecar proxied the audio, the
  * renderer drew the glass. This keeps the parts that mattered -- the warm
@@ -18,6 +18,11 @@ import { activeIndex, parseLrc } from './lrc.js';
 import { BANDS, PRESETS, clampGain, createEq } from './eq.js';
 import { dominantColor, ensureReadable, css } from './color.js';
 import { youTubeId, youTubeThumb, YT_STATE } from './yt.js';
+import {
+  searchiTunes,
+  searchArchive,
+  resolveArchiveItem,
+} from './wax.js';
 import * as q from './queue.js';
 
 const $ = (id) => document.getElementById(id);
@@ -30,6 +35,7 @@ const el = {
   demoBtn: $('demo-btn'),
   search: $('search'),
   library: $('library'),
+  find: $('find'),
   count: $('library-count'),
   empty: $('empty'),
   art: $('art'),
@@ -55,10 +61,11 @@ const el = {
   eqClose: $('eq-close'),
   eqSliders: $('eq-sliders'),
   audio: $('audio'),
+  remote: $('remote'),
   toast: $('toast'),
 };
 
-const DEMO = { name: 'IZGIV — Demo.mp3', url: 'demo/demo.mp3', lyrics: 'demo/demo.lrc' };
+const DEMO = { name: 'Waxwing — Glass.mp3', url: 'demo/demo.mp3', lyrics: 'demo/demo.lrc' };
 
 /*
  * YouTube.
@@ -72,6 +79,19 @@ const youTube = {
   player: null, // the YT.Player
   videoFor: null, // track id currently loaded in the player
 };
+
+/*
+ * Web finds.
+ *
+ * The search box looks in two places that need no key and no scraping:
+ * the iTunes catalogue (official 30-second previews) and the Internet
+ * Archive (full-length, performer-permitted and Creative Commons recordings).
+ * Results live here as row descriptors; they become tracks the moment someone
+ * cues one.
+ */
+
+let finds = []; // [{ kind: 'itunes' | 'archive', ...descriptor }]
+let findToken = 0; // stale-response guard for the debounced search
 
 const state = {
   tracks: new Map(), // id -> track
@@ -332,7 +352,7 @@ async function loadDemo() {
 
     const track = addTrack({
       title: tags.title,
-      artist: tags.artist || 'IZGIV',
+      artist: tags.artist || 'Waxwing',
       album: tags.album || 'Demo',
       coverUrl,
       url: objectUrl(new Blob([bytes], { type: 'audio/mpeg' })),
@@ -354,6 +374,7 @@ function selectTrack(id, { play = true } = {}) {
   q.jumpTo(state.queue, id);
 
   const isYouTube = track.source === 'youtube';
+  const isRemote = track.source === 'itunes' || track.source === 'archive';
   document.body.classList.toggle('on-youtube', isYouTube);
 
   if (isYouTube) {
@@ -361,6 +382,8 @@ function selectTrack(id, { play = true } = {}) {
     el.audio.pause();
     el.audio.removeAttribute('src');
     el.audio.load();
+    el.remote.pause();
+    el.remote.removeAttribute('src');
 
     el.art.classList.remove('is-visible');
     el.artFallback.classList.add('is-hidden');
@@ -372,34 +395,63 @@ function selectTrack(id, { play = true } = {}) {
 
     mountYouTube(track, play);
   } else {
-    youTube.player?.pauseVideo?.();
-    youTube.videoFor = null;
+    stopYouTube();
     el.ytHost.hidden = true;
 
-    el.audio.src = track.url;
+    // Remote audio must never enter the Web Audio graph: a cross-origin file
+    // fed into a MediaElementSource is silenced by policy. It gets its own
+    // un-proxied element, and loses the equalizer — labelled as such.
+    el.remote.pause();
+    el.remote.removeAttribute('src');
+    el.audio.pause();
+    el.audio.removeAttribute('src');
     el.audio.load();
 
-    if (track.coverUrl) {
-      el.art.src = track.coverUrl;
-      el.art.classList.add('is-visible');
-      el.artFallback.classList.add('is-hidden');
-      accentFromImage(track.coverUrl).then((color) => { if (color) setAccent(color); });
+    if (isRemote) {
+      el.remote.src = track.url;
+      el.remote.load();
+      if (track.coverUrl) {
+        el.art.src = track.coverUrl;
+        el.art.classList.add('is-visible');
+        el.artFallback.classList.add('is-hidden');
+        // Artwork from other servers taints the canvas; the default glow stays.
+      } else {
+        el.art.removeAttribute('src');
+        el.art.classList.remove('is-visible');
+        el.artFallback.classList.remove('is-hidden');
+      }
+      if (track.source === 'itunes') toast('Apple 30-second preview — the full song lives at music.apple.com.');
     } else {
-      el.art.removeAttribute('src');
-      el.art.classList.remove('is-visible');
-      el.artFallback.classList.remove('is-hidden');
-      setAccent({ r: 198, g: 148, b: 92 });
+      el.audio.src = track.url;
+      el.audio.load();
+
+      if (track.coverUrl) {
+        el.art.src = track.coverUrl;
+        el.art.classList.add('is-visible');
+        el.artFallback.classList.add('is-hidden');
+        accentFromImage(track.coverUrl).then((color) => { if (color) setAccent(color); });
+      } else {
+        el.art.removeAttribute('src');
+        el.art.classList.remove('is-visible');
+        el.artFallback.classList.remove('is-hidden');
+        setAccent({ r: 198, g: 148, b: 92 });
+      }
     }
   }
 
+  const where = track.source === 'itunes'
+    ? ' · Apple preview'
+    : track.source === 'archive' ? ' · archive.org' : '';
   el.title.textContent = track.title;
-  el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ') || 'unknown artist';
+  el.subtitle.textContent = `${[track.artist, track.album].filter(Boolean).join(' · ') || 'unknown artist'}${where}`;
 
   loadLyricsFor(track);
   renderLibrary();
-  document.title = `${track.title} — IZGIV`;
+  document.title = `${track.title} — Waxwing`;
 
-  if (play && !isYouTube) playAudio();
+  if (play && !isYouTube) {
+    (isRemote ? el.remote.play() : playAudio())?.catch?.((err) => console.warn('playback was refused:', err.message));
+  }
 }
 
 async function playAudio() {
@@ -416,6 +468,13 @@ async function playAudio() {
 const currentTrack = () => state.tracks.get(state.currentId);
 const youTubeUpToDate = () =>
   currentTrack()?.source === 'youtube' && youTube.player && youTube.videoFor === state.currentId;
+
+/** The element transport state reads from: local files, or the un-proxied remote. */
+const activeAudio = () => {
+  const source = currentTrack()?.source;
+  if (source === 'itunes' || source === 'archive') return el.remote;
+  return el.audio;
+};
 
 function stopYouTube() {
   try {
@@ -482,7 +541,7 @@ function onYouTubeState(event) {
       if (state.currentId === track.id) {
         el.title.textContent = track.title;
         el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ');
-        document.title = `${track.title} — IZGIV`;
+        document.title = `${track.title} — Waxwing`;
       }
       renderLibrary();
     }
@@ -523,7 +582,8 @@ function togglePlay() {
     return;
   }
 
-  if (currentTrack()?.source === 'youtube') {
+  const track = currentTrack();
+  if (track?.source === 'youtube') {
     if (!youTubeUpToDate()) {
       mountYouTube(currentTrack(), true);
       return;
@@ -539,6 +599,12 @@ function togglePlay() {
     return;
   }
 
+  if (track?.source === 'itunes' || track?.source === 'archive') {
+    if (el.remote.paused) el.remote.play().catch((err) => console.warn('playback was refused:', err.message));
+    else el.remote.pause();
+    return;
+  }
+
   if (el.audio.paused) playAudio();
   else el.audio.pause();
 }
@@ -551,6 +617,7 @@ function step(direction) {
   if (!nextId) {
     el.audio.pause();
     el.audio.currentTime = 0;
+    el.remote.pause();
     stopYouTube();
     document.body.classList.remove('is-playing');
     toast('End of the queue.');
@@ -730,17 +797,174 @@ function draw() {
   ctx.globalAlpha = 1;
 }
 
+/* ── searching the world's wax ──────────────────────────────────────────── */
+
+const SOURCE_LABEL = {
+  itunes: 'apple 30″',
+  archive: 'archive.org',
+};
+
+function renderFind() {
+  el.find.replaceChildren();
+  if (!finds.length) {
+    el.find.hidden = true;
+    return;
+  }
+
+  const note = document.createElement('p');
+  note.className = 'find-note';
+  note.textContent = `“${el.search.value.trim()}” — full-length from archive.org, previews from Apple:`;
+  el.find.append(note);
+
+  finds.slice(0, 16).forEach((find, index) => {
+    const li = document.createElement('li');
+
+    const button = document.createElement('button');
+    button.className = 'library-item';
+    button.type = 'button';
+    button.dataset.find = String(index);
+
+    const art = document.createElement('img');
+    art.className = 'library-art';
+    art.alt = '';
+    art.loading = 'lazy';
+    if (find.coverUrl) art.src = find.coverUrl;
+
+    const text = document.createElement('span');
+    text.className = 'library-text';
+    const title = document.createElement('span');
+    title.className = 'library-title';
+    title.textContent = find.kind === 'archive'
+      ? (find.title || find.identifier)
+      : find.title;
+    const artist = document.createElement('span');
+    artist.className = 'library-artist';
+    artist.textContent = find.kind === 'archive'
+      ? [find.creator, find.year].filter(Boolean).join(' · ') || 'archive.org'
+      : find.artist || 'Apple Music';
+    text.append(title, artist);
+
+    const time = document.createElement('span');
+    time.className = 'library-time';
+    time.title = SOURCE_LABEL[find.kind];
+    time.textContent = SOURCE_LABEL[find.kind];
+
+    button.append(art, text, time);
+    li.append(button);
+    el.find.append(li);
+  });
+
+  el.find.hidden = false;
+}
+
+/**
+ * Run the search against both sources, debounced: the user is typing, and
+ * both endpoints forgive slow typists less than they forgive bursts.
+ */
+let findTimer;
+function scheduleFind() {
+  const query = el.search.value.trim();
+  if (query.length < 2) {
+    finds = [];
+    renderFind();
+    return;
+  }
+
+  clearTimeout(findTimer);
+  findTimer = setTimeout(async () => {
+    const token = ++findToken; // a newer keystroke makes this response stale
+    const [apple, archive] = await Promise.allSettled([searchiTunes(query), searchArchive(query)]);
+    if (token !== findToken) return;
+
+    const toRows = (result, kind, mapper = (x) => x) =>
+      result.status === 'fulfilled' ? result.value.slice(0, 8).map((x) => ({ kind, ...mapper(x) })) : [];
+    finds = [...toRows(apple, 'itunes'), ...toRows(archive, 'archive')];
+
+    if (apple.status === 'rejected' && archive.status === 'rejected') {
+      toast('Both search engines are unreachable right now.');
+      finds = [];
+    }
+    renderFind();
+  }, 350);
+}
+
+/**
+ * Cue a found row: iTunes previews are ready as they arrive; an archive item
+ * still needs its file list fetched, so its first play costs one request.
+ */
+async function cueFind(index) {
+  const find = finds[index];
+  if (!find) return;
+
+  if (find.kind === 'itunes') {
+    const track = addTrack({
+      title: find.title,
+      artist: find.artist,
+      album: find.album,
+      url: find.url,
+      coverUrl: find.coverUrl,
+      duration: find.duration,
+      source: 'itunes',
+    });
+    persist();
+    toastOnce('Apple previews are 30 seconds. The full song is at music.apple.com.');
+    selectTrack(track.id); // cueing is hearing it, not filing it away
+    return;
+  }
+
+  toastOnce('Fetching the file list…');
+  try {
+    const resolved = await resolveArchiveItem(find);
+    if (!resolved) {
+      toast('That item has no audio file.');
+      return;
+    }
+    const track = addTrack({
+      title: find.title,
+      artist: find.creator,
+      album: find.year ? String(find.year) : '',
+      url: resolved.url,
+      coverUrl: resolved.coverUrl,
+      duration: 0,
+      source: 'archive',
+    });
+    selectTrack(track.id);
+    el.search.value = '';
+    finds = [];
+    renderFind();
+    persist();
+  } catch (err) {
+    toast(`archive.org: ${err.message}`);
+  }
+}
+
+let onceTimer;
+function toastOnce(message) {
+  if (el.toast.hidden || el.toast.textContent !== message) toast(message);
+  clearTimeout(onceTimer);
+  onceTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
+}
+
 /* ── settings ───────────────────────────────────────────────────────────── */
 
-const STORE_KEY = 'izgiv.settings.v1';
+const STORE_KEY = 'izgiv.settings.v2';
 
 function persist() {
   try {
+    // URL-addressable tracks survive a reload: YouTube links, Apple previews
+    // and archive.org items can all be re-fetched. Local files cannot — their
+    // blob URLs die with the tab, which is already written on the tin.
+    const savedTracks = [...state.tracks.values()]
+      .filter((track) => ['youtube', 'itunes', 'archive'].includes(track.source))
+      .slice(-400)
+      .map(({ id, ...track }) => track);
     localStorage.setItem(STORE_KEY, JSON.stringify({
       gains: state.gains,
       volume: Number(el.volume.value),
       shuffle: state.queue.shuffle,
       repeat: state.queue.repeat,
+      nextId: state.nextId,
+      tracks: savedTracks,
     }));
   } catch {
     /* private mode, or no storage: the app still plays */
@@ -760,6 +984,21 @@ function restore() {
   if (Number.isFinite(saved.volume)) el.volume.value = String(saved.volume);
   if (saved.shuffle) q.setShuffle(state.queue, true);
   if (['off', 'all', 'one'].includes(saved.repeat)) q.setRepeat(state.queue, saved.repeat);
+
+  if (Array.isArray(saved.tracks) && saved.tracks.length) {
+    const keep = saved.tracks.filter((track) =>
+      (track?.url) && ['youtube', 'itunes', 'archive'].includes(track.source));
+    if (keep.length) {
+      state.nextId = Math.max(Number(saved.nextId) || 0, state.nextId) || state.nextId;
+      for (const track of keep) {
+        const id = `t${state.nextId++}`;
+        state.tracks.set(id, { ...track, id });
+        state.ids.push(id);
+        q.append(state.queue, [id]);
+      }
+      state.nextId = Math.max(state.nextId, Number(saved.nextId) || 0);
+    }
+  }
 }
 
 /* ── wiring ─────────────────────────────────────────────────────────────── */
@@ -768,8 +1007,12 @@ function syncControls() {
   el.shuffle.setAttribute('aria-pressed', String(state.queue.shuffle));
   el.repeat.setAttribute('aria-pressed', String(state.queue.repeat !== 'off'));
   el.repeatBadge.hidden = state.queue.repeat !== 'one';
-  el.audio.volume = Number(el.volume.value) / 100;
-  el.audio.muted = el.mute.getAttribute('aria-pressed') === 'true';
+  const volume = Number(el.volume.value) / 100;
+  const muted = el.mute.getAttribute('aria-pressed') === 'true';
+  el.audio.volume = volume;
+  el.audio.muted = muted;
+  el.remote.volume = volume;
+  el.remote.muted = muted;
   el.volume.style.setProperty('--progress', `${el.volume.value}%`);
 }
 
@@ -810,7 +1053,7 @@ async function addYouTube() {
       if (state.currentId === track.id) {
         el.title.textContent = track.title;
         el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ');
-        document.title = `${track.title} — IZGIV`;
+        document.title = `${track.title} — Waxwing`;
       }
     }
   } catch {
@@ -837,7 +1080,15 @@ function wire() {
     });
   });
 
-  el.search.addEventListener('input', renderLibrary);
+  el.search.addEventListener('input', () => {
+    renderLibrary();
+    scheduleFind();
+  });
+
+  el.find.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-find]');
+    if (button) cueFind(Number(button.dataset.find));
+  });
 
   el.library.addEventListener('click', (event) => {
     const button = event.target.closest('.library-item');
@@ -866,7 +1117,8 @@ function wire() {
 
   el.seek.addEventListener('input', () => {
     state.seeking = true;
-    const duration = el.audio.duration || 0;
+    const audio = activeAudio();
+    const duration = audio?.duration || 0;
     const fraction = Number(el.seek.value) / 1000;
     el.seek.style.setProperty('--progress', `${fraction * 100}%`);
     if (youTubeUpToDate()) {
@@ -883,8 +1135,9 @@ function wire() {
       const duration = youTube.player.getDuration?.() || 0;
       if (duration) youTube.player.seekTo(fraction * duration, true);
     } else {
-      const duration = el.audio.duration || 0;
-      if (duration) el.audio.currentTime = fraction * duration;
+      const audio = activeAudio();
+      const duration = audio?.duration || 0;
+      if (duration) audio.currentTime = fraction * duration;
     }
     state.seeking = false;
   });
@@ -908,8 +1161,9 @@ function wire() {
     // The filters sit between the local audio element and the speakers. A
     // YouTube track bypasses that path entirely, so say so once instead of
     // letting someone push a slider that cannot do anything.
-    if (currentTrack()?.source === 'youtube' && el.eqPanel.hidden) {
-      toast('The equalizer shapes local files. YouTube brings its own audio.');
+    const source = currentTrack()?.source;
+    if ((source === 'youtube' || source === 'itunes' || source === 'archive') && el.eqPanel.hidden) {
+      toast('The equalizer shapes local files only. Streamed audio brings its own.');
     }
     el.eqPanel.hidden = !el.eqPanel.hidden;
   });
@@ -922,34 +1176,40 @@ function wire() {
 
   el.audio.addEventListener('play', () => document.body.classList.add('is-playing'));
   el.audio.addEventListener('pause', () => document.body.classList.remove('is-playing'));
+  el.remote.addEventListener('play', () => document.body.classList.add('is-playing'));
+  el.remote.addEventListener('pause', () => document.body.classList.remove('is-playing'));
 
-  el.audio.addEventListener('loadedmetadata', () => {
-    el.total.textContent = clock(el.audio.duration);
-    const track = state.tracks.get(state.currentId);
-    if (track && Number.isFinite(el.audio.duration)) {
-      track.duration = el.audio.duration;
-      renderLibrary();
-    }
-  });
+  // Both transport elements share one set of behaviours; the element under
+  // them changes, the instincts do not.
+  for (const audio of [el.audio, el.remote]) {
+    audio.addEventListener('loadedmetadata', () => {
+      el.total.textContent = clock(audio.duration);
+      const track = state.tracks.get(state.currentId);
+      if (track && Number.isFinite(audio.duration)) {
+        track.duration = audio.duration;
+        renderLibrary();
+      }
+    });
 
-  el.audio.addEventListener('timeupdate', () => {
-    const duration = el.audio.duration || 0;
-    if (!state.seeking) {
-      el.current.textContent = clock(el.audio.currentTime);
-      el.seek.value = duration ? String(Math.round((el.audio.currentTime / duration) * 1000)) : '0';
-      el.seek.style.setProperty('--progress', `${duration ? (el.audio.currentTime / duration) * 100 : 0}%`);
-    }
-    syncLyrics(el.audio.currentTime);
-  });
+    audio.addEventListener('timeupdate', () => {
+      const duration = audio.duration || 0;
+      if (!state.seeking) {
+        el.current.textContent = clock(audio.currentTime);
+        el.seek.value = duration ? String(Math.round((audio.currentTime / duration) * 1000)) : '0';
+        el.seek.style.setProperty('--progress', `${duration ? (audio.currentTime / duration) * 100 : 0}%`);
+      }
+      syncLyrics(audio.currentTime);
+    });
 
-  el.audio.addEventListener('ended', () => {
-    const nextId = q.next(state.queue, { automatic: true });
-    if (nextId) selectTrack(nextId);
-    else {
-      document.body.classList.remove('is-playing');
-      el.audio.currentTime = 0;
-    }
-  });
+    audio.addEventListener('ended', () => {
+      const nextId = q.next(state.queue, { automatic: true });
+      if (nextId) selectTrack(nextId);
+      else {
+        document.body.classList.remove('is-playing');
+        audio.currentTime = 0;
+      }
+    });
+  }
 
   // Drop anywhere. The window is the target so a miss does not navigate away.
   let dragDepth = 0;
@@ -974,10 +1234,10 @@ function wire() {
     const tag = event.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || event.metaKey || event.ctrlKey) return;
 
-    // Works for both sources: five seconds is five seconds.
+    // Works for every source: five seconds is five seconds.
     const duration = youTubeUpToDate()
       ? youTube.player.getDuration?.() || 0
-      : el.audio.duration || 0;
+      : activeAudio()?.duration || 0;
 
     switch (event.key) {
       case ' ':
@@ -987,17 +1247,17 @@ function wire() {
       case 'ArrowRight': {
         const target = Math.min(duration, (youTubeUpToDate()
           ? youTube.player.getCurrentTime?.() || 0
-          : el.audio.currentTime) + 5);
+          : activeAudio()?.currentTime || 0) + 5);
         if (youTubeUpToDate()) youTube.player.seekTo(target, true);
-        else el.audio.currentTime = target;
+        else if (activeAudio()) activeAudio().currentTime = target;
         break;
       }
       case 'ArrowLeft': {
         const target = Math.max(0, (youTubeUpToDate()
           ? youTube.player.getCurrentTime?.() || 0
-          : el.audio.currentTime) - 5);
+          : activeAudio()?.currentTime || 0) - 5);
         if (youTubeUpToDate()) youTube.player.seekTo(target, true);
-        else el.audio.currentTime = target;
+        else if (activeAudio()) activeAudio().currentTime = target;
         break;
       }
       case 'n': step(1); break;
@@ -1019,7 +1279,7 @@ function wire() {
 async function boot() {
   window.addEventListener('error', (event) => {
     const box = $('boot-error');
-    box.textContent = `IZGIV could not start.\n\n${event.message}`;
+    box.textContent = `Waxwing could not start.\n\n${event.message}`;
     box.hidden = false;
     document.documentElement.dataset.ready = 'error';
   });

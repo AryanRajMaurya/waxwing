@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IZGIV — a player for your own music</title>
-  <meta name="description" content="IZGIV in the browser. Plays the music already on your disk — nothing uploaded, no account, no install." />
+  <title>Waxwing — a player for your music, and the world’s wax</title>
+  <meta name="description" content="Waxwing in the browser. Your own files, Apple previews and full archive.org recordings under one queue — nothing uploaded, no account, no install." />
   <meta name="theme-color" content="#12100e" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
@@ -16,12 +16,12 @@
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">I</span>
-      <span class="brand-name">IZGIV</span>
-      <span class="brand-tag">your files, not a subscription</span>
+      <span class="brand-name">WAXWING</span>
+      <span class="brand-tag">your files, the world’s wax</span>
     </div>
     <div class="topbar-actions">
       <label class="field search">
-        <input id="search" type="search" placeholder="Search title, artist, album" autocomplete="off" />
+        <input id="search" type="search" placeholder="Search — your library and the world’s wax" autocomplete="off" />
       </label>
       <button id="import-btn" class="btn">Add music</button>
       <button id="yt-btn" class="btn ghost">YouTube</button>
@@ -46,13 +46,16 @@
       </div>
 
       <ul id="library" class="library"></ul>
+      <!-- Live results from iTunes and archive.org; the search box is the
+           only interface to them. -->
+      <ul id="find" class="library find" hidden></ul>
     </section>
 
     <section class="player-panel" aria-label="Now playing">
       <div class="stage-center">
         <div class="art-wrap">
           <img id="art" class="art" alt="" />
-          <div id="art-fallback" class="art-fallback" aria-hidden="true">IZGIV</div>
+          <div id="art-fallback" class="art-fallback" aria-hidden="true">WAXWING</div>
           <!-- YouTube tracks play inside the art frame, in YouTube's own
                embed. The audio never passes through this page, so the EQ and
                the visualiser are local-file features only. -->
@@ -126,6 +129,10 @@
   </footer>
 
   <audio id="audio" preload="metadata"></audio>
+
+  <!-- Streamed finds play here: un-proxied by Web Audio on purpose, so a
+       cross-origin file is never silenced by the cross-origin taint rules. -->
+  <audio id="remote" preload="metadata"></audio>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <p id="boot-error" class="boot-error" hidden></p>

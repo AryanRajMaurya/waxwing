@@ -1,12 +1,14 @@
-# IZGIV
+# Waxwing
 
-**A player for the music you already own.** Drop your files on the page and
-they play — nothing is uploaded, there is no account, and there is nothing to
-install.
+**A crate-digger that plays.** Type a name — hear it: full-length concerts and
+Creative Commons records from the Internet Archive, Apple's official
+30-second previews of the mainstream catalogue, your own files, YouTube —
+one queue, one page. Nothing is uploaded, there is no account, and there is
+nothing to install.
 
-[**Open the player →**](https://aryanrajmaurya.github.io/izgiv/)
+[**Open the player →**](https://aryanrajmaurya.github.io/waxwing/)
 
-![IZGIV playing the demo track: cover art, the accent taken from it, scrolling lyrics and a spectrum visualiser](docs/player.png)
+![Waxwing playing the demo track: cover art, the accent taken from it, scrolling lyrics and a spectrum visualiser](docs/player.png)
 
 ## Why this exists
 
@@ -23,6 +25,20 @@ it.
 
 ## What it does
 
+- **Finds the song, from sources that are theirs to give.** Type into the
+  search box and both find-sources answer at once:
+  - **Internet Archive** — full-length recordings: the Live Music Archive
+    (thousands of concert recordings the performers themselves released),
+    Creative Commons uploads, and a century of pre-copyright wax. The best
+    audio file is picked per item — never a 300 MB FLAC between someone and
+    a song — and it streams full-length.
+  - **iTunes** — the mainstream catalogue, as Apple itself grants it: the
+    official 30-second preview, real artwork and metadata, and a link to
+    where the song is sold. A refresh on what wax is, not a replacement for
+    buying it.
+  Deliberately not built: scraping download rips of the mainstream catalogue.
+  The previews and the Archive require no key and no scraping, and a player
+  built on someone else's stolen files isn't worth the domain it runs on.
 - **Plays the files you drop on it.** MP3, FLAC, OGG, Opus, M4A, WAV — whatever
   the browser can decode. The picker, drag-and-drop and a folder-sized drop all
   work.
@@ -73,6 +89,7 @@ Nothing is bundled. The modules are plain ES modules loaded by the browser:
 | `src/eq.js` | The ten filters, presets, and the preamp calculation |
 | `src/queue.js` | Play order, shuffle bag, repeat, previous/next |
 | `src/yt.js` | YouTube URLs → video id, the IFrame API contract |
+| `src/wax.js` | The two find-sources: iTunes (JSONP) and archive.org (search, metadata, file choice) |
 | `src/app.js` | The UI, the Web Audio graph and the playback loop |
 
 Three decisions worth knowing about:

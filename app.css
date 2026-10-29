@@ -1,4 +1,4 @@
-/* IZGIV — glass, warm ink, and one accent taken from the cover. */
+/* Waxwing — glass, warm ink, and one accent taken from the cover. */
 
 :root {
   --bg: #0c0a09;
@@ -151,6 +151,20 @@ body {
 .empty-body { margin: 0; color: var(--muted); font-size: 13px; max-width: 34ch; }
 
 .library { list-style: none; margin: 0; padding: 8px; overflow-y: auto; flex: 1; }
+
+/* Web finds share the library rows' bones; the divider and the note line are
+   what set them apart from the files the user owns. */
+.find {
+  flex: 0 0 auto;
+  max-height: 45%;
+  border-top: 1px solid var(--line);
+}
+
+.find-note {
+  margin: 4px 2px 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
 
 .library-item {
   display: grid;

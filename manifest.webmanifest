@@ -1,6 +1,6 @@
 {
-  "name": "IZGIV",
-  "short_name": "IZGIV",
+  "name": "Waxwing",
+  "short_name": "Waxwing",
   "description": "A player for the music already on your disk. Nothing uploaded, no account.",
   "start_url": "./",
   "scope": "./",
