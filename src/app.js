@@ -22,7 +22,9 @@ import {
   searchiTunes,
   searchArchive,
   resolveArchiveItem,
+  lookupiTunes,
 } from './wax.js';
+import { odesliUrl, summarizeOdesli } from './odesli.js';
 import * as q from './queue.js';
 
 const $ = (id) => document.getElementById(id);
@@ -802,6 +804,7 @@ function draw() {
 const SOURCE_LABEL = {
   itunes: 'apple 30″',
   archive: 'archive.org',
+  youtube: 'youtube',
 };
 
 function renderFind() {
@@ -895,6 +898,19 @@ function scheduleFind() {
 async function cueFind(index) {
   const find = finds[index];
   if (!find) return;
+
+  if (find.kind === 'youtube') {
+    const track = addTrack({
+      title: find.title,
+      artist: find.artist || 'YouTube',
+      url: find.url,
+      coverUrl: find.coverUrl,
+      source: 'youtube',
+    });
+    persist();
+    selectTrack(track.id);
+    return;
+  }
 
   if (find.kind === 'itunes') {
     const track = addTrack({
@@ -1023,16 +1039,11 @@ function syncControls() {
  * carries no key; if the fetch is refused the video id stands in until the
  * player itself reports the real title.
  */
-async function addYouTube() {
-  const input = prompt('Paste a YouTube link or video id:');
-  if (!input) return;
-
-  const videoId = youTubeId(input);
-  if (!videoId) {
-    toast('That does not look like a YouTube link.');
-    return;
-  }
-
+/**
+ * Mount a known YouTube id: add it to the library, fetch the real title
+ * from YouTube's public oEmbed endpoint, and select it.
+ */
+async function addYouTubeTrack(videoId) {
   const track = addTrack({
     title: videoId,
     artist: 'YouTube',
@@ -1063,9 +1074,78 @@ async function addYouTube() {
   selectTrack(track.id);
 }
 
+async function addYouTube() {
+  const input = prompt('Paste a YouTube link or video id:');
+  if (!input) return;
+
+  const videoId = youTubeId(input);
+  if (!videoId) {
+    toast('That does not look like a YouTube link.');
+    return;
+  }
+  await addYouTubeTrack(videoId);
+}
+
+/**
+ * Add a link of any platform: a plain YouTube id goes straight to the embed
+ * route; anything else is resolved by song.link (Odesli) across platforms.
+ * From the summary, routes are offered as find rows: Apple's official
+ * preview, full-length recordings from archive.org, and the YouTube embed.
+ * Cues are left to the user, so one paste never silently plays three songs.
+ */
+async function addAnyLink() {
+  const input = prompt('Paste any music link — YouTube, YouTube Music, Apple Music, Spotify, song.link:');
+  if (!input) return;
+
+  const videoId = youTubeId(input);
+  if (videoId) {
+    addYouTubeTrack(videoId);
+    return;
+  }
+
+  toastOnce('Resolving the link across platforms…');
+  try {
+    const response = await fetch(odesliUrl(input));
+    if (!response.ok) throw new Error(`song.link answered ${response.status}`);
+    const summary = summarizeOdesli(await response.json());
+    if (!summary) throw new Error('that link did not resolve to a song');
+
+    finds = [];
+    if (summary.youtubeId) {
+      finds.push({ kind: 'youtube', title: summary.title, artist: summary.artist, url: summary.youtubeId, coverUrl: youTubeThumb(summary.youtubeId) });
+    }
+    if (summary.appleId || summary.applePreview) {
+      const apple = summary.applePreview
+        ? { title: summary.title, artist: summary.artist, url: summary.applePreview, coverUrl: summary.coverUrl }
+        : await lookupiTunes(summary.appleId).catch(() => null);
+      if (apple?.url) finds.push({ kind: 'itunes', title: apple.title, artist: apple.artist, album: apple.album, url: apple.url, coverUrl: apple.coverUrl || summary.coverUrl, duration: apple.duration });
+    }
+    if (summary.title) {
+      const archiveResults = await searchArchive([summary.artist, summary.title].filter(Boolean).join(' ')).catch(() => []);
+      finds.push(...archiveResults.slice(0, 6).map((row) => ({ kind: 'archive', ...row })));
+    }
+
+    if (!finds.length) {
+      toast('Nothing playable found for that link.');
+      return;
+    }
+    renderFind();
+    toastOnce(`${finds.length} route${finds.length === 1 ? '' : 's'} found — pick one to cue.`);
+  } catch (err) {
+    console.warn('odesli:', err.message);
+    // song.link unreachable or the link unknown: fall back to searching the
+    // pasted text as a query, which is what a human would have typed.
+    toastOnce(`song.link: ${err.message} — searching the pasted text instead.`);
+    el.search.value = input;
+    scheduleFind();
+  }
+}
+
 function wire() {
   el.importBtn.addEventListener('click', () => el.fileInput.click());
-  el.ytBtn.addEventListener('click', addYouTube);
+  // One button for every link: plain YouTube links go straight to the
+  // embed route; the rest go through song.link first.
+  el.ytBtn.addEventListener('click', addAnyLink);
   el.fileInput.addEventListener('change', () => {
     addFiles(el.fileInput.files);
     el.fileInput.value = '';

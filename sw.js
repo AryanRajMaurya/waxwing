@@ -7,7 +7,7 @@
  * the user's files, not this app's.
  */
 
-const CACHE = 'waxwing-v6';
+const CACHE = 'waxwing-v7';
 const SHELL = [
   './',
   './index.html',
@@ -22,6 +22,7 @@ const SHELL = [
   './src/eq.js',
   './src/yt.js',
   './src/wax.js',
+  './src/odesli.js',
   './demo/demo.mp3',
   './demo/demo.lrc',
 ];

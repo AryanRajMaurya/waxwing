@@ -25,6 +25,13 @@ it.
 
 ## What it does
 
+- **Resolves any link through song.link (Odesli).** The *Add link* button
+  takes any music URL — YouTube Music, Apple Music, Spotify, song.link share
+  links — and Odesli's public API reports the same song across platforms.
+  From that one mapping the player offers every route it honestly can: the
+  official Apple preview, full-length archive.org recordings, and the
+  YouTube embed — pick one and cue it. When song.link is unreachable it
+  falls back to searching the pasted text.
 - **Finds the song, from sources that are theirs to give.** Type into the
   search box and both find-sources answer at once:
   - **Internet Archive** — full-length recordings: the Live Music Archive

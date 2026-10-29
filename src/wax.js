@@ -17,6 +17,7 @@
  */
 
 const ITUNES = 'https://itunes.apple.com/search';
+const ITUNES_LOOKUP = 'https://itunes.apple.com/lookup';
 const ARCHIVE_SEARCH = 'https://archive.org/advancedsearch.php';
 const ARCHIVE_METADATA = 'https://archive.org/metadata';
 const ARCHIVE_DOWNLOAD = 'https://archive.org/download';
@@ -149,6 +150,16 @@ export function searchiTunes(term) {
   return jsonp(`${ITUNES}?${params}`).then((data) =>
     (data?.results || []).map(pickiTunesTrack).filter(Boolean),
   );
+}
+
+/**
+ * Look one song up by its Apple numeric id — the direct route when Odesli
+ * has already told us which song it is. Same shape as a search row, or null.
+ */
+export function lookupiTunes(id) {
+  if (!id) return Promise.reject(new Error('no apple id'));
+  return jsonp(`${ITUNES_LOOKUP}?${new URLSearchParams({ id: String(id) })}`)
+    .then((data) => pickiTunesTrack(data?.results?.[0]));
 }
 
 /** Search the Archive. Resolves to lightweight item descriptors. */
