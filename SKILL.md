@@ -114,6 +114,8 @@ If tracks were found but no download succeeded, display the first track's previe
 - **Preview downloads save to**: `/data/home/.hermes/cache/scratch/` (temp directory via `tempfile.mktemp`).
 - **Verified working**: iTunes API search and preview download was tested and confirmed working with multiple queries producing valid M4A preview files via direct HTTP download. yt-dlp fallback was intentionally excluded per user preference. Bandcamp and Audiomack search via yt-dlp extractors are available as secondary sources when iTunes has no results.
 - **Bandcamp/Audiomack reliability**: These extractors use yt-dlp's native support but may still encounter site-level bot detection (CAPTCHAs, login walls). If both iTunes and Bandcamp/Audiomack fail, the preview URL from iTunes should be displayed as the most reliable fallback.
+- **UI/UX aesthetic**: The user indicated the previous waxwing UI had "AI slop" aesthetics and requested a remake with proper visual hierarchy, terminal styling, and emoji indicators. This preference is encoded in v2.0 and future sessions should maintain this styling standard.
+- **Bandcamp/Audiomack reliability**: These extractors use yt-dlp's native support but may still encounter site-level bot detection (CAPTCHAs, login walls). If both iTunes and Bandcamp/Audiomack fail, the preview URL from iTunes should be displayed as the most reliable fallback.
 
 ## Topical references (references/ directory)
 
