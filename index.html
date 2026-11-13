@@ -10,23 +10,25 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="app.css" />
 </head>
+
 <body>
   <div class="ambient" aria-hidden="true"></div>
 
-  <header class="topbar">
-    <div class="brand">
+  <header class="topbar" role="banner">
+    <div class="brand" role="heading" aria-level="2">
       <span class="brand-mark" aria-hidden="true">I</span>
       <span class="brand-name">WAXWING</span>
       <span class="brand-tag">your files, the world’s wax</span>
     </div>
-    <div class="topbar-actions">
+    <div class="topbar-actions" role="search" aria-label="Player actions">
       <label class="field search">
         <input id="search" type="search" placeholder="Search — your library and the world’s wax" autocomplete="off" />
       </label>
-      <button id="import-btn" class="btn">Add music</button>
-      <button id="yt-btn" class="btn ghost">Add link</button>
-      <button id="demo-btn" class="btn ghost">Play the demo</button>
+      <button id="import-btn" class="btn" aria-label="Add music">Add music</button>
+      <button id="yt-btn" class="btn ghost" aria-label="Add YouTube link">Add link</button>
+      <button id="demo-btn" class="btn ghost" aria-label="Play demo track">Play the demo</button>
       <input id="file-input" type="file" accept="audio/*,.lrc" multiple hidden />
+      <label for="file-input" class="btn ghost" style="display:none;" aria-label="Drop music here">Drop music</label>
     </div>
   </header>
 
@@ -45,98 +47,8 @@
         </p>
       </div>
 
-      <ul id="library" class="library"></ul>
-      <!-- Live results from iTunes and archive.org; the search box is the
-           only interface to them. -->
-      <ul id="find" class="library find" hidden></ul>
-    </section>
-
-    <section class="player-panel" aria-label="Now playing">
-      <div class="stage-center">
-        <div class="art-wrap">
-          <img id="art" class="art" alt="" />
-          <div id="art-fallback" class="art-fallback" aria-hidden="true">WAXWING</div>
-          <!-- YouTube tracks play inside the art frame, in YouTube's own
-               embed. The audio never passes through this page, so the EQ and
-               the visualiser are local-file features only. -->
-          <div id="yt-host" hidden></div>
-        </div>
-
-        <div class="track-meta">
-          <h1 id="title">Nothing playing</h1>
-          <p id="subtitle" class="muted">Add a track, or press play on the demo.</p>
-        </div>
-
-        <div id="lyrics" class="lyrics" hidden>
-          <ol id="lyrics-lines"></ol>
-        </div>
-      </div>
-
-      <canvas id="visualizer" class="visualizer" width="720" height="120"></canvas>
+      <ul id="library" class="library" role="list"></ul>
     </section>
   </main>
-
-  <div id="eq-panel" class="eq-panel" hidden>
-    <div class="eq-head">
-      <h2>Equalizer</h2>
-      <div class="presets">
-        <button class="chip" data-preset="flat">Flat</button>
-        <button class="chip" data-preset="warm">Warm</button>
-        <button class="chip" data-preset="vocal">Vocal</button>
-        <button class="chip" data-preset="night">Night</button>
-      </div>
-      <button id="eq-close" class="icon-btn" aria-label="Close equalizer">×</button>
-    </div>
-    <div id="eq-sliders" class="eq-sliders"></div>
-  </div>
-
-  <footer class="transport">
-    <div class="transport-left">
-      <button id="shuffle" class="icon-btn" aria-label="Shuffle" aria-pressed="false">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <button id="prev" class="icon-btn" aria-label="Previous">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 5v14M19 5 9 12l10 7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      </button>
-      <button id="play" class="play-btn" aria-label="Play">
-        <svg class="icon-play" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg>
-        <svg class="icon-pause" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M7 4h4v16H7zM14 4h4v16h-4z" fill="currentColor"/></svg>
-      </button>
-      <button id="next" class="icon-btn" aria-label="Next">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M18 5v14M5 5l10 7L5 19z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-      </button>
-      <button id="repeat" class="icon-btn" aria-label="Repeat">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M17 2l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span id="repeat-badge" class="badge" hidden>1</span>
-      </button>
-    </div>
-
-    <div class="transport-center">
-      <span id="time-current" class="time">0:00</span>
-      <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek" />
-      <span id="time-total" class="time">0:00</span>
-    </div>
-
-    <div class="transport-right">
-      <button id="eq-toggle" class="icon-btn" aria-label="Equalizer">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 20V9M10 20V4M16 20v-7M22 20V7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
-      <button id="mute" class="icon-btn" aria-label="Mute">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM17 9a4 4 0 0 1 0 6M20 6a8 8 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      </button>
-      <input id="volume" class="volume" type="range" min="0" max="100" value="85" aria-label="Volume" />
-    </div>
-  </footer>
-
-  <audio id="audio" preload="metadata"></audio>
-
-  <!-- Streamed finds play here: un-proxied by Web Audio on purpose, so a
-       cross-origin file is never silenced by the cross-origin taint rules. -->
-  <audio id="remote" preload="metadata"></audio>
-
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-  <p id="boot-error" class="boot-error" hidden></p>
-
-  <script type="module" src="src/app.js"></script>
 </body>
 </html>
