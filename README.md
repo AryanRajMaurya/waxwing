@@ -29,6 +29,12 @@ Two places it lives, from the same tree:
 `vendor/` is on Antideploy's ignore list, which is why the library is at
 `assets/howler.js` rather than beside the source. GitHub Pages serves either.
 
+**One third-party block worth knowing:** SomaFM refuses requests whose `Referer`
+is a `github.io` page, so on the GitHub Pages copy those rows cue and read LIVE
+but never play. Every other origin — Antideploy, a self-hosted copy, localhost —
+plays them. It is their hotlink rule, not the player; Radio Browser is not
+blocked and plays on Pages.
+
 ## What it does
 
 - **Four catalogues, no keys.** Deezer (30″ MP3 previews, cover art), Apple
