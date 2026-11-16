@@ -1,30 +1,22 @@
 /**
  * Waxwing, in the browser.
  *
- * The original was an Electron app: a Node sidecar proxied the audio, the
- * renderer drew the glass. This keeps the parts that mattered -- the warm
- * glass, the accent that follows the cover, the equalizer, the queue -- and
- * drops the parts that made it fragile: nothing is downloaded, nothing is
- * proxied, and the music is whatever is already on the disk.
+ * The UI is a broadsheet: a find rail on the left, the plate in the middle, the
+ * running order on the right. Everything under it is a module:
  *
- * Everything below the UI is a pure module with tests behind it:
- *   tags.js   ID3v2 reader        queue.js  play order and repeat
- *   lrc.js    lyric timing        color.js  accent from the cover
- *   eq.js     the filter chain
+ *   sources.js  the four catalogues            player.js  Howler + EQ graph
+ *   tags.js     ID3v2 reader                   lrc.js     lyric timing
+ *   color.js    accent from the cover          eq.js      the filter chain
+ *   queue.js    play order and repeat
  */
 
 import { readTags } from './tags.js';
 import { activeIndex, parseLrc } from './lrc.js';
-import { BANDS, PRESETS, clampGain, createEq } from './eq.js';
-import { dominantColor, ensureReadable, css } from './color.js';
-import { youTubeId, youTubeThumb, YT_STATE } from './yt.js';
-import {
-  searchiTunes,
-  searchArchive,
-  resolveArchiveItem,
-  lookupiTunes,
-} from './wax.js';
-import { odesliUrl, summarizeOdesli } from './odesli.js';
+import { dominantColor, ensureOnPaper, css } from './color.js';
+import { BANDS, PRESETS, clampGain } from './eq.js';
+import { SOURCES, search, resolve as resolveSource } from './sources.js';
+import { Player } from './player.js';
+import { BARS, binsFor } from './viz.js';
 import * as q from './queue.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,84 +24,66 @@ const $ = (id) => document.getElementById(id);
 const el = {
   fileInput: $('file-input'),
   importBtn: $('import-btn'),
-  ytBtn: $('yt-btn'),
-  ytHost: $('yt-host'),
-  demoBtn: $('demo-btn'),
+  clearBtn: $('clear-btn'),
+  form: $('search-form'),
   search: $('search'),
-  library: $('library'),
-  find: $('find'),
-  count: $('library-count'),
-  empty: $('empty'),
+  sourceNote: $('source-note'),
+  resultsStatus: $('results-status'),
+  results: $('results'),
   art: $('art'),
-  artFallback: $('art-fallback'),
-  title: $('title'),
+  title: $('title-text'),
+  titleGhost: document.querySelector('.title-ghost'),
   subtitle: $('subtitle'),
-  visualizer: $('visualizer'),
   lyrics: $('lyrics'),
   lyricsLines: $('lyrics-lines'),
+  visualizer: $('visualizer'),
+  timeCurrent: $('time-current'),
+  timeTotal: $('time-total'),
+  seek: $('seek'),
   play: $('play'),
   prev: $('prev'),
   next: $('next'),
   shuffle: $('shuffle'),
   repeat: $('repeat'),
   repeatBadge: $('repeat-badge'),
-  seek: $('seek'),
-  current: $('time-current'),
-  total: $('time-total'),
   volume: $('volume'),
   mute: $('mute'),
   eqToggle: $('eq-toggle'),
   eqPanel: $('eq-panel'),
   eqClose: $('eq-close'),
+  eqPresets: $('eq-presets'),
   eqSliders: $('eq-sliders'),
-  audio: $('audio'),
-  remote: $('remote'),
+  eqNote: $('eq-note'),
+  library: $('library'),
+  libraryCount: $('library-count'),
+  empty: $('empty'),
   toast: $('toast'),
+  editionSource: $('edition-source'),
+  editionCounts: $('edition-counts'),
 };
 
 const DEMO = { name: 'Waxwing — Glass.mp3', url: 'demo/demo.mp3', lyrics: 'demo/demo.lrc' };
-
-/*
- * YouTube.
- *
- * The embedded player replaces the art frame while a YouTube track is up.
- * It is created once and re-used: the IFrame API is one script the browser
- * caches, and a fresh player per track would flash a black rectangle.
- */
-const youTube = {
-  api: null, // the promise for window.YT
-  player: null, // the YT.Player
-  videoFor: null, // track id currently loaded in the player
-};
-
-/*
- * Web finds.
- *
- * The search box looks in two places that need no key and no scraping:
- * the iTunes catalogue (official 30-second previews) and the Internet
- * Archive (full-length, performer-permitted and Creative Commons recordings).
- * Results live here as row descriptors; they become tracks the moment someone
- * cues one.
- */
-
-let finds = []; // [{ kind: 'itunes' | 'archive', ...descriptor }]
-let findToken = 0; // stale-response guard for the debounced search
+const STORE_KEY = 'waxwing.settings.v3';
 
 const state = {
-  tracks: new Map(), // id -> track
-  ids: [], // library order
+  tracks: new Map(),
   queue: q.createQueue([]),
   currentId: null,
-  lyrics: null,
-  lyricsFor: null,
-  lrcByBase: new Map(), // "song name" -> lrc text, waiting for its audio
-  gains: [...PRESETS.flat],
-  graph: null,
+  finds: [],
+  source: 'deezer',
   nextId: 1,
+  gains: [...PRESETS.flat],
+  volume: 0.8,
+  muted: false,
+  lyrics: null,
+  lastLyric: -1,
+  lyricsByBase: new Map(),
   seeking: false,
 };
 
-/* ── small helpers ──────────────────────────────────────────────────────── */
+let objectUrls = [];
+
+/* ── helpers ──────────────────────────────────────────────────────────── */
 
 const pad = (n) => String(n).padStart(2, '0');
 const clock = (seconds) => {
@@ -117,136 +91,154 @@ const clock = (seconds) => {
   const total = Math.floor(seconds);
   return `${Math.floor(total / 60)}:${pad(total % 60)}`;
 };
-
-const baseName = (name) => name.replace(/\.[a-z0-9]+$/i, '').toLowerCase();
+const baseName = (name) => String(name || '').replace(/\.[a-z0-9]+$/i, '').toLowerCase();
 
 let toastTimer;
 function toast(message) {
   el.toast.textContent = message;
   el.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
+  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3600);
 }
 
-/* ── the audio graph ────────────────────────────────────────────────────── */
-
-/**
- * Build the Web Audio graph on the first play.
- *
- * Browsers refuse an AudioContext before a gesture, and a media element can
- * only be routed through one source node, so this happens exactly once.
- */
-function ensureGraph() {
-  if (state.graph) {
-    if (state.graph.context.state === 'suspended') state.graph.context.resume();
-    return state.graph;
-  }
-
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return null;
-
-  const context = new Ctx();
-  const source = context.createMediaElementSource(el.audio);
-  const eq = createEq(context, state.gains);
-  const analyser = context.createAnalyser();
-  // 2048 bins is 21 Hz per bar at 44.1 kHz -- fine enough to separate a bass
-  // line from a kick. The default 256 bins are 172 Hz wide, which lumps the
-  // whole low end into four bars and leaves the top half of the display dark.
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.8;
-
-  // source -> eq -> analyser -> speakers
-  source.connect(eq.input);
-  eq.output.connect(analyser);
-  analyser.connect(context.destination);
-
-  state.graph = { context, source, eq, analyser, data: new Uint8Array(analyser.frequencyBinCount) };
-  return state.graph;
-}
-
-/* ── accent from the cover ──────────────────────────────────────────────── */
-
-function setAccent(color) {
-  const readable = ensureReadable(color);
-  document.documentElement.style.setProperty('--accent', css(readable));
-  document.documentElement.style.setProperty('--accent-soft', css(readable, 0.18));
-  document.documentElement.style.setProperty('--on-accent', '#12100e');
-}
-
-/** Average the cover down to a thumbnail and take its dominant colour. */
-function accentFromImage(url) {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 32;
-        canvas.height = 32;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(image, 0, 0, 32, 32);
-        resolve(dominantColor(ctx.getImageData(0, 0, 32, 32).data));
-      } catch {
-        resolve(null);
-      }
-    };
-    image.onerror = () => resolve(null);
-    image.src = url;
-  });
-}
-
-/* ── the library ────────────────────────────────────────────────────────── */
-
-let objectUrls = [];
 function objectUrl(blob) {
   const url = URL.createObjectURL(blob);
   objectUrls.push(url);
   return url;
 }
 
-function addTrack({ title, artist, album, url, coverUrl, duration = 0, demo = false, source = 'local' }) {
+/* ── accent ────────────────────────────────────────────────────────────── */
+
+function setAccent(color) {
+  const accent = ensureOnPaper(color || { r: 179, g: 65, b: 10 });
+  document.documentElement.style.setProperty('--accent', css(accent));
+}
+
+/**
+ * Take the accent from a cover, when the cover allows it.
+ *
+ * Reading pixels out of a cross-origin image taints the canvas unless the
+ * server sends `Access-Control-Allow-Origin`, so only hosts known to send it
+ * are probed. Everywhere else the default spot colour stays, and the artwork
+ * itself is unaffected — the plate image is a plain `<img>` and needs no CORS.
+ */
+const CORS_COVER_HOSTS = ['dzcdn.net', 'mzstatic.com', 'archive.org'];
+
+function coverIsReadable(url) {
+  try {
+    const { hostname } = new URL(url);
+    return CORS_COVER_HOSTS.some((allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`));
+  } catch {
+    return false;
+  }
+}
+
+function accentFromImage(url) {
+  if (!url || !coverIsReadable(url)) return;
+  const image = new Image();
+  image.crossOrigin = 'anonymous';
+  image.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32;
+      canvas.height = 32;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(image, 0, 0, 32, 32);
+      setAccent(dominantColor(ctx.getImageData(0, 0, 32, 32).data));
+    } catch {
+      /* tainted or undecodable: the default spot colour stays */
+    }
+  };
+  image.src = url;
+}
+
+/* ── the player ────────────────────────────────────────────────────────── */
+
+const player = new Player({
+  onMode: (mode) => {
+    document.body.dataset.mode = mode || 'web';
+    const note = mode === 'html5'
+      ? 'This source plays in HTML5 mode — the sound is untouched, so the equaliser and the spectrum do not apply.'
+      : 'Equaliser and spectrum are in circuit for this track.';
+    el.eqNote.textContent = note;
+  },
+  onReady: (duration) => {
+    if (duration) {
+      const track = currentTrack();
+      if (track && !track.duration) {
+        track.duration = duration;
+        renderLibrary();
+      }
+    }
+  },
+  onEnded: () => advance('automatic'),
+  onError: (message) => toast(message),
+});
+
+const currentTrack = () => state.tracks.get(state.currentId);
+
+function advance(kind) {
+  const nextId = q.next(state.queue, { automatic: kind === 'automatic' });
+  if (nextId) selectTrack(nextId, { play: true });
+  else {
+    document.body.classList.remove('is-playing');
+    toast('End of the running order.');
+  }
+}
+
+function step(direction) {
+  const nextId = direction > 0
+    ? q.next(state.queue, { automatic: false })
+    : q.previous(state.queue);
+  if (nextId) selectTrack(nextId, { play: true });
+}
+
+/* ── library ───────────────────────────────────────────────────────────── */
+
+function addTrack(input) {
   const id = `t${state.nextId++}`;
-  const track = { id, title, artist, album, url, coverUrl, duration, demo, source };
+  const track = {
+    id,
+    source: input.source || 'local',
+    title: input.title || 'Untitled',
+    artist: input.artist || '',
+    album: input.album || '',
+    url: input.url,
+    cover: input.cover || '',
+    duration: input.duration || 0,
+    format: input.format || '',
+    local: Boolean(input.local),
+    demo: Boolean(input.demo),
+  };
   state.tracks.set(id, track);
-  state.ids.push(id);
   q.append(state.queue, [id]);
   renderLibrary();
   return track;
 }
 
-function visibleTracks() {
-  const needle = el.search.value.trim().toLowerCase();
-  const ids = state.ids;
-  if (!needle) return ids;
-  return ids.filter((id) => {
-    const t = state.tracks.get(id);
-    return `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle);
-  });
-}
-
 function renderLibrary() {
-  const ids = visibleTracks();
+  const ids = state.queue.ids;
   el.library.replaceChildren();
-  el.count.textContent = `${state.ids.length} ${state.ids.length === 1 ? 'track' : 'tracks'}`;
-  el.empty.hidden = state.ids.length > 0;
+  el.libraryCount.textContent = `${ids.length} ${ids.length === 1 ? 'track' : 'tracks'} in the crate`;
+  el.empty.hidden = ids.length > 0;
+  el.editionCounts.textContent = `${ids.length} in the crate`;
 
-  for (const id of ids) {
+  ids.forEach((id, index) => {
     const track = state.tracks.get(id);
-    const li = document.createElement('li');
+    if (!track) return;
 
+    const li = document.createElement('li');
     const button = document.createElement('button');
-    button.className = 'library-item';
     button.type = 'button';
+    button.className = 'library-item';
     button.dataset.id = id;
     button.setAttribute('aria-current', String(id === state.currentId));
 
-    const art = document.createElement('img');
-    art.className = 'library-art';
-    art.alt = '';
-    if (track.coverUrl) art.src = track.coverUrl;
-    else art.src = 'icon.svg';
+    const indexEl = document.createElement('span');
+    indexEl.className = 'library-index';
+    indexEl.textContent = String(index + 1).padStart(2, '0');
 
     const text = document.createElement('span');
-    text.className = 'library-text';
     const title = document.createElement('span');
     title.className = 'library-title';
     title.textContent = track.title;
@@ -255,118 +247,15 @@ function renderLibrary() {
     artist.textContent = track.artist || (track.demo ? 'demo' : 'unknown artist');
     text.append(title, artist);
 
-    const time = document.createElement('span');
-    time.className = 'library-time';
-    time.textContent = track.duration ? clock(track.duration) : '—';
+    const meta = document.createElement('span');
+    meta.className = 'library-meta';
+    meta.textContent = track.duration ? clock(track.duration) : '';
 
-    button.append(art, text, time);
-    if (track.demo) {
-      const badge = document.createElement('span');
-      badge.className = 'library-time';
-      badge.textContent = 'demo';
-      badge.hidden = true; // the artist line already says it
-    }
+    button.append(indexEl, text, meta);
     li.append(button);
     el.library.append(li);
-  }
+  });
 }
-
-/* ── importing ──────────────────────────────────────────────────────────── */
-
-/**
- * Read one audio file.
- *
- * ID3 tags sit at the front, so the first megabyte is enough for the title,
- * the artist and the cover; reading the whole file would stall on a big FLAC.
- */
-async function readTrack(file) {
-  const head = new Uint8Array(await file.slice(0, 1024 * 1024).arrayBuffer());
-  const tags = readTags(head, file.name);
-  let coverUrl = '';
-
-  if (tags.picture?.data?.length) {
-    // The picture is a `Uint8Array` view over the file's buffer; copy it so the
-    // blob is not tied to the parent array.
-    const blob = new Blob([tags.picture.data.slice()], { type: tags.picture.mime || 'image/jpeg' });
-    coverUrl = objectUrl(blob);
-  }
-
-  return {
-    title: tags.title,
-    artist: tags.artist,
-    album: tags.album,
-    coverUrl,
-    url: objectUrl(file),
-    size: file.size,
-  };
-}
-
-async function addFiles(fileList) {
-  const files = [...fileList];
-  if (!files.length) return;
-
-  const lyricsFiles = files.filter((f) => /\.lrc$/i.test(f.name));
-  for (const file of lyricsFiles) {
-    rememberLyrics(file.name, await file.text());
-  }
-
-  const audioFiles = files.filter((f) => /\.(mp3|flac|ogg|oga|m4a|aac|wav|opus|webm)$/i.test(f.name) || f.type.startsWith('audio/'));
-  if (!audioFiles.length) {
-    if (lyricsFiles.length) toast('Lyrics added — drop the audio with the same name.');
-    else toast('No audio files in that drop.');
-    return;
-  }
-
-  let added = 0;
-  for (const file of audioFiles) {
-    try {
-      const info = await readTrack(file);
-      const track = addTrack(info);
-      added += 1;
-      if (!state.currentId) selectTrack(track.id, { play: false });
-    } catch (err) {
-      console.error('could not read', file.name, err);
-    }
-  }
-
-  if (added) toast(`Added ${added} ${added === 1 ? 'track' : 'tracks'}.`);
-}
-
-/** Load the bundled demo so the page does something before any import. */
-async function loadDemo() {
-  try {
-    const response = await fetch(DEMO.url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const tags = readTags(bytes, DEMO.name);
-    let coverUrl = '';
-    if (tags.picture?.data?.length) {
-      coverUrl = objectUrl(new Blob([tags.picture.data.slice()], { type: tags.picture.mime || 'image/jpeg' }));
-    }
-
-    // The lyrics are optional: a missing .lrc must not stop the demo loading.
-    try {
-      const lrc = await fetch(DEMO.lyrics);
-      if (lrc.ok) rememberLyrics(DEMO.lyrics, await lrc.text());
-    } catch (err) {
-      console.warn('demo lyrics unavailable:', err.message);
-    }
-
-    const track = addTrack({
-      title: tags.title,
-      artist: tags.artist || 'Waxwing',
-      album: tags.album || 'Demo',
-      coverUrl,
-      url: objectUrl(new Blob([bytes], { type: 'audio/mpeg' })),
-      demo: true,
-    });
-    selectTrack(track.id, { play: false });
-  } catch (err) {
-    console.warn('demo track unavailable:', err.message);
-  }
-}
-
-/* ── playback ───────────────────────────────────────────────────────────── */
 
 function selectTrack(id, { play = true } = {}) {
   const track = state.tracks.get(id);
@@ -375,285 +264,260 @@ function selectTrack(id, { play = true } = {}) {
   state.currentId = id;
   q.jumpTo(state.queue, id);
 
-  const isYouTube = track.source === 'youtube';
-  const isRemote = track.source === 'itunes' || track.source === 'archive';
-  document.body.classList.toggle('on-youtube', isYouTube);
-
-  if (isYouTube) {
-    // The local audio must stop: two songs at once is the classic bug here.
-    el.audio.pause();
-    el.audio.removeAttribute('src');
-    el.audio.load();
-    el.remote.pause();
-    el.remote.removeAttribute('src');
-
-    el.art.classList.remove('is-visible');
-    el.artFallback.classList.add('is-hidden');
-    el.ytHost.hidden = false;
-    // A thumbnail as art source for the library row and, later, if the track
-    // is revisited.
-    track.coverUrl ||= youTubeThumb(track.url);
-    setAccent({ r: 170, g: 120, b: 80 }); // keep the default warmth; thumbs are cross-origin
-
-    mountYouTube(track, play);
-  } else {
-    stopYouTube();
-    el.ytHost.hidden = true;
-
-    // Remote audio must never enter the Web Audio graph: a cross-origin file
-    // fed into a MediaElementSource is silenced by policy. It gets its own
-    // un-proxied element, and loses the equalizer — labelled as such.
-    el.remote.pause();
-    el.remote.removeAttribute('src');
-    el.audio.pause();
-    el.audio.removeAttribute('src');
-    el.audio.load();
-
-    if (isRemote) {
-      el.remote.src = track.url;
-      el.remote.load();
-      if (track.coverUrl) {
-        el.art.src = track.coverUrl;
-        el.art.classList.add('is-visible');
-        el.artFallback.classList.add('is-hidden');
-        // Artwork from other servers taints the canvas; the default glow stays.
-      } else {
-        el.art.removeAttribute('src');
-        el.art.classList.remove('is-visible');
-        el.artFallback.classList.remove('is-hidden');
-      }
-      if (track.source === 'itunes') toast('Apple 30-second preview — the full song lives at music.apple.com.');
-    } else {
-      el.audio.src = track.url;
-      el.audio.load();
-
-      if (track.coverUrl) {
-        el.art.src = track.coverUrl;
-        el.art.classList.add('is-visible');
-        el.artFallback.classList.add('is-hidden');
-        accentFromImage(track.coverUrl).then((color) => { if (color) setAccent(color); });
-      } else {
-        el.art.removeAttribute('src');
-        el.art.classList.remove('is-visible');
-        el.artFallback.classList.remove('is-hidden');
-        setAccent({ r: 198, g: 148, b: 92 });
-      }
-    }
-  }
-
-  const where = track.source === 'itunes'
-    ? ' · Apple preview'
-    : track.source === 'archive' ? ' · archive.org' : '';
+  el.art.src = track.cover || '';
+  el.art.style.display = track.cover ? '' : 'none';
   el.title.textContent = track.title;
-  el.subtitle.textContent = `${[track.artist, track.album].filter(Boolean).join(' · ') || 'unknown artist'}${where}`;
+  el.titleGhost.textContent = track.title;
+  el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ')
+    || 'unknown artist';
+
+  if (track.cover) accentFromImage(track.cover);
+  else setAccent(null);
 
   loadLyricsFor(track);
   renderLibrary();
-  document.title = `${track.title} — Waxwing`;
 
-  if (play && !isYouTube) {
-    (isRemote ? el.remote.play() : playAudio())?.catch?.((err) => console.warn('playback was refused:', err.message));
-  }
+  player.load(track, { autoplay: play });
+  syncTransport();
 }
 
-async function playAudio() {
-  ensureGraph();
-  try {
-    await el.audio.play();
-  } catch (err) {
-    // Autoplay policy: the first play needs a gesture, which the click was.
-    console.warn('playback was refused:', err.message);
-  }
+function syncTransport() {
+  el.play.setAttribute('aria-label', player.playing() ? 'Pause' : 'Play');
 }
 
-/** The current track, or null when nothing is up. */
-const currentTrack = () => state.tracks.get(state.currentId);
-const youTubeUpToDate = () =>
-  currentTrack()?.source === 'youtube' && youTube.player && youTube.videoFor === state.currentId;
+/* ── searching ─────────────────────────────────────────────────────────── */
 
-/** The element transport state reads from: local files, or the un-proxied remote. */
-const activeAudio = () => {
-  const source = currentTrack()?.source;
-  if (source === 'itunes' || source === 'archive') return el.remote;
-  return el.audio;
-};
+function setSource(source) {
+  if (!SOURCES[source]) return;
+  state.source = source;
+  state.finds = [];
 
-function stopYouTube() {
-  try {
-    youTube.player?.pauseVideo?.();
-  } catch {
-    /* the iframe may already be gone */
+  for (const tab of document.querySelectorAll('.tab')) {
+    tab.setAttribute('aria-selected', String(tab.dataset.source === source));
   }
-  youTube.videoFor = null;
+  el.search.placeholder = SOURCES[source].placeholder;
+  el.sourceNote.textContent = SOURCES[source].note;
+  el.editionSource.textContent = SOURCES[source].label;
+  el.results.replaceChildren();
+  el.resultsStatus.textContent = '';
+  renderResults();
 }
 
-async function mountYouTube(track, play) {
-  try {
-    if (!youTube.api) {
-      youTube.api = new Promise((resolve, reject) => {
-        const done = () => (window.YT?.Player ? resolve(window.YT) : null);
-        if (done()) return resolve(window.YT);
-        const previous = window.onYouTubeIframeAPIReady;
-        window.onYouTubeIframeAPIReady = () => {
-          previous?.();
-          resolve(window.YT);
-        };
-        const script = document.createElement('script');
-        script.src = 'https://www.youtube.com/iframe_api';
-        script.onerror = () => reject(new Error('YouTube could not be reached from this network'));
-        document.head.append(script);
-      });
-    }
+let searchToken = 0;
+let searchTimer;
 
-    const YT = await youTube.api;
-    if (!youTube.player) {
-      youTube.player = new YT.Player('yt-host', {
-        playerVars: { rel: 0, playsinline: 1, origin: location.origin },
-        events: {
-          onError: () => toast('YouTube refused to play that video.'),
-        },
-      });
-      youTube.player.addEventListener('onStateChange', (event) => onYouTubeState(event));
-    }
+async function runSearch() {
+  const term = el.search.value.trim();
+  const token = ++searchToken;
 
-    if (play) {
-      youTube.videoFor = track.id;
-      // setVolume first: the iframe starts at YouTube's default (often 5%).
-      youTube.player.setVolume(Number(el.volume.value));
-      youTube.player.loadVideoById(track.url);
-    }
-  } catch (err) {
-    console.warn('youtube:', err.message);
-    toast(err.message);
-  }
-}
-
-function onYouTubeState(event) {
-  const playerState = event.data;
-
-  if (playerState === YT_STATE.PLAYING) {
-    document.body.classList.add('is-playing');
-    // The real title and channel arrive with the video; a pasted id is a
-    // poor label for either.
-    const track = state.tracks.get(youTube.videoFor);
-    const data = youTube.player.getVideoData?.();
-    if (track && data?.title && track.title !== data.title) {
-      track.title = data.title;
-      track.artist = data.author || 'YouTube';
-      if (state.currentId === track.id) {
-        el.title.textContent = track.title;
-        el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ');
-        document.title = `${track.title} — Waxwing`;
-      }
-      renderLibrary();
-    }
-  } else if (playerState === YT_STATE.PAUSED) {
-    document.body.classList.remove('is-playing');
-  } else if (playerState === YT_STATE.ENDED) {
-    document.body.classList.remove('is-playing');
-    const nextId = q.next(state.queue, { automatic: true });
-    if (nextId) selectTrack(nextId);
-  }
-}
-
-/**
- * The YouTube iframe gives no timeupdate event, so the clock, the seek bar
- * and the lyrics are fed from the draw loop instead — a few times a second
- * is finer than a song needs and coarser than the reader cares about.
- */
-let lastYtPoll = 0;
-function syncFromYouTube(now) {
-  if (state.seeking || !youTubeUpToDate() || now - lastYtPoll < 250) return;
-  lastYtPoll = now;
-
-  const player = youTube.player;
-  const time = player.getCurrentTime?.() || 0;
-  const duration = player.getDuration?.() || 0;
-
-  el.current.textContent = clock(time);
-  if (duration > 0) {
-    el.seek.value = String(Math.round((time / duration) * 1000));
-    el.seek.style.setProperty('--progress', `${(time / duration) * 100}%`);
-  }
-  syncLyrics(time);
-}
-
-function togglePlay() {
-  if (!state.currentId) {
-    if (state.ids.length) selectTrack(state.ids[0]);
+  if (term.length < 2) {
+    state.finds = [];
+    el.resultsStatus.textContent = '';
+    renderResults();
     return;
   }
 
-  const track = currentTrack();
-  if (track?.source === 'youtube') {
-    if (!youTubeUpToDate()) {
-      mountYouTube(currentTrack(), true);
+  el.resultsStatus.textContent = `Searching ${SOURCES[state.source].label}…`;
+  try {
+    const rows = await search(state.source, term);
+    if (token !== searchToken) return;
+    state.finds = rows;
+    el.resultsStatus.textContent = rows.length
+      ? `${rows.length} result${rows.length === 1 ? '' : 's'}`
+      : 'Nothing found.';
+    renderResults();
+  } catch (err) {
+    if (token !== searchToken) return;
+    state.finds = [];
+    el.resultsStatus.textContent = '';
+    toast(`${SOURCES[state.source].label}: ${err.message}`);
+    renderResults();
+  }
+}
+
+function scheduleSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 320);
+}
+
+function renderResults() {
+  el.results.replaceChildren();
+
+  if (!state.finds.length) {
+    if (el.resultsStatus.textContent) {
+      const li = document.createElement('li');
+      li.className = 'results-empty';
+      li.textContent = 'Nothing in this catalogue matches.';
+      el.results.append(li);
+    }
+    return;
+  }
+
+  state.finds.forEach((item, index) => {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'result';
+
+    const indexEl = document.createElement('span');
+    indexEl.className = 'result-index';
+    indexEl.textContent = String(index + 1).padStart(2, '0');
+
+    const text = document.createElement('span');
+    const title = document.createElement('span');
+    title.className = 'result-title';
+    title.textContent = item.title;
+    const artist = document.createElement('span');
+    artist.className = 'result-artist';
+    artist.textContent = item.artist || 'unknown artist';
+    text.append(title, artist);
+
+    const badge = document.createElement('span');
+    badge.className = 'result-badge';
+    badge.dataset.mode = SOURCES[item.source]?.mode || 'web';
+    badge.textContent = SOURCES[item.source]?.label || item.source;
+
+    button.append(indexEl, text, badge);
+    button.addEventListener('click', () => cue(item));
+    li.append(button);
+    el.results.append(li);
+  });
+}
+
+/** Cue a search result: resolve lazy sources, file it, play it. */
+async function cue(item) {
+  if (!item) return;
+  el.resultsStatus.textContent = 'Fetching the file…';
+  try {
+    const resolved = await resolveSource(item);
+    if (!resolved?.url) {
+      toast('That item has no audio file.');
+      el.resultsStatus.textContent = '';
       return;
     }
-    const playing = youTube.player.getPlayerState?.() === YT_STATE.PLAYING;
-    if (playing) {
-      youTube.player.pauseVideo();
-      document.body.classList.remove('is-playing');
-    } else {
-      youTube.player.setVolume(Number(el.volume.value));
-      youTube.player.playVideo();
+    const track = addTrack(resolved);
+    selectTrack(track.id, { play: true });
+    el.search.value = '';
+    state.finds = [];
+    el.resultsStatus.textContent = '';
+    renderResults();
+    persist();
+  } catch (err) {
+    toast(`${SOURCES[item.source]?.label || 'Source'}: ${err.message}`);
+    el.resultsStatus.textContent = '';
+  }
+}
+
+/* ── local files ───────────────────────────────────────────────────────── */
+
+async function readTrack(file) {
+  const head = new Uint8Array(await file.slice(0, 1024 * 1024).arrayBuffer());
+  const tags = readTags(head, file.name);
+  let cover = '';
+
+  if (tags.picture?.data?.length) {
+    const blob = new Blob([tags.picture.data.slice()], { type: tags.picture.mime || 'image/jpeg' });
+    cover = objectUrl(blob);
+  }
+
+  return {
+    source: 'local',
+    title: tags.title,
+    artist: tags.artist,
+    album: tags.album,
+    cover,
+    url: objectUrl(file),
+    format: (file.name.split('.').pop() || '').toLowerCase(),
+    local: true,
+  };
+}
+
+async function addFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+
+  const lyricsFiles = files.filter((f) => /\.lrc$/i.test(f.name));
+  for (const file of lyricsFiles) rememberLyrics(file.name, await file.text());
+
+  const audioFiles = files.filter((f) =>
+    /\.(mp3|flac|ogg|oga|m4a|aac|wav|opus|webm)$/i.test(f.name) || f.type.startsWith('audio/'));
+
+  if (!audioFiles.length) {
+    toast(lyricsFiles.length
+      ? 'Lyrics added — drop the audio with the same name.'
+      : 'No audio files in that drop.');
+    return;
+  }
+
+  let added = 0;
+  for (const file of audioFiles) {
+    try {
+      const track = addTrack(await readTrack(file));
+      added += 1;
+      if (!state.currentId) selectTrack(track.id, { play: false });
+    } catch (err) {
+      console.error('could not read', file.name, err);
     }
-    return;
   }
 
-  if (track?.source === 'itunes' || track?.source === 'archive') {
-    if (el.remote.paused) el.remote.play().catch((err) => console.warn('playback was refused:', err.message));
-    else el.remote.pause();
-    return;
+  if (added) {
+    toast(`Added ${added} ${added === 1 ? 'track' : 'tracks'}.`);
+    persist();
   }
-
-  if (el.audio.paused) playAudio();
-  else el.audio.pause();
 }
 
-function step(direction) {
-  const nextId = direction > 0
-    ? q.next(state.queue, { automatic: false })
-    : q.previous(state.queue);
+async function loadDemo() {
+  try {
+    const response = await fetch(DEMO.url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const tags = readTags(bytes, DEMO.name);
 
-  if (!nextId) {
-    el.audio.pause();
-    el.audio.currentTime = 0;
-    el.remote.pause();
-    stopYouTube();
-    document.body.classList.remove('is-playing');
-    toast('End of the queue.');
-    return;
+    let cover = '';
+    if (tags.picture?.data?.length) {
+      cover = objectUrl(new Blob([tags.picture.data.slice()], { type: tags.picture.mime || 'image/jpeg' }));
+    }
+
+    try {
+      const lrc = await fetch(DEMO.lyrics);
+      if (lrc.ok) rememberLyrics(DEMO.lyrics, await lrc.text());
+    } catch {
+      /* lyrics are optional */
+    }
+
+    const track = addTrack({
+      source: 'local',
+      title: tags.title,
+      artist: tags.artist || 'Waxwing',
+      album: tags.album || 'Demo',
+      cover,
+      url: objectUrl(new Blob([bytes], { type: 'audio/mpeg' })),
+      format: 'mp3',
+      demo: true,
+      local: true,
+    });
+    selectTrack(track.id, { play: false });
+  } catch (err) {
+    console.warn('demo unavailable:', err.message);
   }
-  selectTrack(nextId);
 }
 
-/* ── lyrics ─────────────────────────────────────────────────────────────── */
+/* ── lyrics ────────────────────────────────────────────────────────────── */
 
-/**
- * Remember an .lrc under every name it could be looked up by.
- *
- * A file called `demo.lrc` sitting next to `Glass.mp3` would otherwise never
- * match: the lookup is by track title. The tag inside the lyric file is the
- * reliable name, so that wins when it is there.
- */
 function rememberLyrics(fileName, text) {
   const { meta } = parseLrc(text);
   const keys = new Set([baseName(fileName)]);
   if (meta.ti) keys.add(baseName(meta.ti));
-  for (const key of keys) if (key) state.lrcByBase.set(key, text);
+  for (const key of keys) if (key) state.lyricsByBase.set(key, text);
 }
 
 function loadLyricsFor(track) {
-  const base = baseName(track.title || '');
-  const text = state.lrcByBase.get(base);
+  const text = state.lyricsByBase.get(baseName(track.title));
   state.lyrics = text ? parseLrc(text).lines : null;
-  state.lyricsFor = text ? track.id : null;
+  state.lastLyric = -1;
 
   el.lyrics.hidden = !state.lyrics?.length;
-  document.body.classList.toggle('has-lyrics', Boolean(state.lyrics?.length));
   el.lyricsLines.replaceChildren();
-
   if (state.lyrics?.length) {
     for (const line of state.lyrics) {
       const li = document.createElement('li');
@@ -663,27 +527,28 @@ function loadLyricsFor(track) {
   }
 }
 
-let lastLyricIndex = -1;
 function syncLyrics(time) {
   if (!state.lyrics?.length) return;
   const index = activeIndex(state.lyrics, time);
-  if (index === lastLyricIndex) return;
-  lastLyricIndex = index;
+  if (index === state.lastLyric) return;
+  state.lastLyric = index;
 
-  [...el.lyricsLines.children].forEach((li, i) => {
-    li.classList.toggle('is-active', i === index);
-  });
+  [...el.lyricsLines.children].forEach((li, i) => li.classList.toggle('is-active', i === index));
   const active = el.lyricsLines.children[index];
   if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
 
-/* ── the equalizer panel ────────────────────────────────────────────────── */
+/* ── equaliser ─────────────────────────────────────────────────────────── */
 
 function renderEq() {
   el.eqSliders.replaceChildren();
   BANDS.forEach((frequency, index) => {
-    const band = document.createElement('div');
+    const band = document.createElement('label');
     band.className = 'eq-band';
+
+    const label = document.createElement('span');
+    label.className = 'eq-band-label';
+    label.textContent = frequency >= 1000 ? `${frequency / 1000}k` : String(frequency);
 
     const slider = document.createElement('input');
     slider.type = 'range';
@@ -691,62 +556,44 @@ function renderEq() {
     slider.max = '12';
     slider.step = '1';
     slider.value = String(state.gains[index]);
-    slider.setAttribute('aria-label', `${frequency} Hz`);
+    slider.setAttribute('aria-label', `${frequency} hertz`);
     slider.addEventListener('input', () => {
       state.gains[index] = clampGain(slider.value);
-      state.graph?.eq.setGains(state.gains);
+      player.setGains(state.gains);
       persist();
     });
 
-    const label = document.createElement('span');
-    label.textContent = frequency >= 1000 ? `${frequency / 1000}k` : String(frequency);
+    const value = document.createElement('span');
+    value.className = 'eq-band-label';
+    value.textContent = `${Number(state.gains[index]) > 0 ? '+' : ''}${state.gains[index]}`;
 
-    band.append(slider, label);
+    band.append(label, slider, value);
     el.eqSliders.append(band);
   });
+
+  markActivePreset();
+}
+
+/** Light the chip whose preset the current gains actually match. */
+function markActivePreset() {
+  const current = state.gains.join(',');
+  for (const chip of el.eqPresets.querySelectorAll('[data-preset]')) {
+    const preset = PRESETS[chip.dataset.preset];
+    chip.classList.toggle('is-active', Boolean(preset) && preset.join(',') === current);
+  }
 }
 
 function applyPreset(name) {
   const preset = PRESETS[name];
   if (!preset) return;
   state.gains = [...preset];
-  state.graph?.eq.setGains(state.gains);
+  player.setGains(state.gains);
   renderEq();
   persist();
 }
 
-/* ── visualizer ─────────────────────────────────────────────────────────── */
+/* ── visualiser ────────────────────────────────────────────────────────── */
 
-const BARS = 56;
-const MIN_HZ = 40;
-const MAX_HZ = 14000;
-const LOG_SPAN = Math.log(MAX_HZ / MIN_HZ);
-
-/**
- * Which analysis bins feed bar `index`.
- *
- * Frequencies are laid out logarithmically because hearing is: with linear
- * bars, an entire bassline and a kick drum fight over the first two bars and
- * the remaining fifty sit dark. Each bar owns every bin between its lower and
- * upper edge, so wide treble bands still sum up to something visible.
- */
-function binsFor(index, total, nyquist = 22050) {
-  const lowEdge = MIN_HZ * Math.exp((index / BARS) * LOG_SPAN);
-  const highEdge = MIN_HZ * Math.exp(((index + 1) / BARS) * LOG_SPAN);
-  const from = Math.floor((lowEdge / nyquist) * total);
-  const to = Math.max(from, Math.ceil((highEdge / nyquist) * total) - 1);
-  return [Math.max(1, from), Math.min(total - 1, to)];
-}
-
-let rafId = 0;
-
-/**
- * Match the backing store to the CSS box.
- *
- * A canvas with a fixed 720x120 backing store stretched to a 900 px column is
- * drawn through a blur filter by the browser. Sizing it to the real box (times
- * the device pixel ratio) makes the bars crisp on a retina screen.
- */
 function sizeCanvas() {
   const canvas = el.visualizer;
   const rect = canvas.getBoundingClientRect();
@@ -760,7 +607,6 @@ function sizeCanvas() {
 }
 
 function draw() {
-  rafId = requestAnimationFrame(draw);
   const canvas = el.visualizer;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -769,221 +615,85 @@ function draw() {
   const { width, height } = canvas;
   ctx.clearRect(0, 0, width, height);
 
-  syncFromYouTube(performance.now());
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#b3410a';
+  const spectrum = player.spectrum();
 
-  const graph = state.graph;
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c6945c';
-
-  if (!graph) {
-    // Idle: a flat line, so the panel does not look broken before first play.
-    ctx.fillStyle = 'rgba(245,239,228,0.12)';
+  if (!spectrum) {
+    // No graph in circuit (HTML5 mode, or nothing loaded yet): a ruled line,
+    // and an honest label when the source is the reason.
+    ctx.fillStyle = 'rgb(23 19 15 / 0.28)';
     ctx.fillRect(0, height / 2 - 0.5, width, 1);
+
+    if (player.trackMode === 'html5') {
+      ctx.fillStyle = 'rgb(23 19 15 / 0.55)';
+      ctx.font = `${Math.max(10, Math.round(height * 0.15))}px ui-monospace, Menlo, monospace`;
+      ctx.textBaseline = 'middle';
+      ctx.fillText('SPECTRUM UNAVAILABLE — THIS SOURCE PLAYS IN HTML5 MODE', 10, height / 2 - 11);
+    }
     return;
   }
 
-  graph.analyser.getByteFrequencyData(graph.data);
+  const { data, sampleRate } = spectrum;
+  const nyquist = sampleRate / 2;
   const barWidth = width / BARS;
-  const nyquist = graph.context.sampleRate / 2;
 
   for (let i = 0; i < BARS; i += 1) {
-    const [from, to] = binsFor(i, graph.data.length, nyquist);
+    const [from, to] = binsFor(i, data.length, nyquist);
     let sum = 0;
-    for (let bin = from; bin <= to; bin += 1) sum += graph.data[bin];
+    for (let bin = from; bin <= to; bin += 1) sum += data[bin];
     const value = sum / (to - from + 1) / 255;
 
-    const barHeight = Math.max(1.5, value ** 1.15 * height * 0.92);
+    const barHeight = Math.max(1.5, value ** 1.15 * height * 0.94);
     ctx.fillStyle = accent;
-    ctx.globalAlpha = 0.22 + value * 0.78;
-    ctx.fillRect(i * barWidth + barWidth * 0.2, (height - barHeight) / 2, barWidth * 0.6, barHeight);
+    ctx.globalAlpha = 0.24 + value * 0.76;
+    ctx.fillRect(i * barWidth + barWidth * 0.22, (height - barHeight) / 2, barWidth * 0.56, barHeight);
   }
   ctx.globalAlpha = 1;
 }
 
-/* ── searching the world's wax ──────────────────────────────────────────── */
+/* ── the clock loop ────────────────────────────────────────────────────── */
 
-const SOURCE_LABEL = {
-  itunes: 'apple 30″',
-  archive: 'archive.org',
-  youtube: 'youtube',
-};
+function tick() {
+  requestAnimationFrame(tick);
 
-function renderFind() {
-  el.find.replaceChildren();
-  if (!finds.length) {
-    el.find.hidden = true;
-    return;
-  }
+  const playing = player.playing();
+  document.body.classList.toggle('is-playing', playing);
 
-  const note = document.createElement('p');
-  note.className = 'find-note';
-  note.textContent = `“${el.search.value.trim()}” — full-length from archive.org, previews from Apple:`;
-  el.find.append(note);
-
-  finds.slice(0, 16).forEach((find, index) => {
-    const li = document.createElement('li');
-
-    const button = document.createElement('button');
-    button.className = 'library-item';
-    button.type = 'button';
-    button.dataset.find = String(index);
-
-    const art = document.createElement('img');
-    art.className = 'library-art';
-    art.alt = '';
-    art.loading = 'lazy';
-    if (find.coverUrl) art.src = find.coverUrl;
-
-    const text = document.createElement('span');
-    text.className = 'library-text';
-    const title = document.createElement('span');
-    title.className = 'library-title';
-    title.textContent = find.kind === 'archive'
-      ? (find.title || find.identifier)
-      : find.title;
-    const artist = document.createElement('span');
-    artist.className = 'library-artist';
-    artist.textContent = find.kind === 'archive'
-      ? [find.creator, find.year].filter(Boolean).join(' · ') || 'archive.org'
-      : find.artist || 'Apple Music';
-    text.append(title, artist);
-
-    const time = document.createElement('span');
-    time.className = 'library-time';
-    time.title = SOURCE_LABEL[find.kind];
-    time.textContent = SOURCE_LABEL[find.kind];
-
-    button.append(art, text, time);
-    li.append(button);
-    el.find.append(li);
-  });
-
-  el.find.hidden = false;
-}
-
-/**
- * Run the search against both sources, debounced: the user is typing, and
- * both endpoints forgive slow typists less than they forgive bursts.
- */
-let findTimer;
-function scheduleFind() {
-  const query = el.search.value.trim();
-  if (query.length < 2) {
-    finds = [];
-    renderFind();
-    return;
-  }
-
-  clearTimeout(findTimer);
-  findTimer = setTimeout(async () => {
-    const token = ++findToken; // a newer keystroke makes this response stale
-    const [apple, archive] = await Promise.allSettled([searchiTunes(query), searchArchive(query)]);
-    if (token !== findToken) return;
-
-    const toRows = (result, kind, mapper = (x) => x) =>
-      result.status === 'fulfilled' ? result.value.slice(0, 8).map((x) => ({ kind, ...mapper(x) })) : [];
-    finds = [...toRows(apple, 'itunes'), ...toRows(archive, 'archive')];
-
-    if (apple.status === 'rejected' && archive.status === 'rejected') {
-      toast('Both search engines are unreachable right now.');
-      finds = [];
+  if (!state.seeking) {
+    const time = player.time();
+    const duration = player.duration();
+    el.timeCurrent.textContent = clock(time);
+    el.timeTotal.textContent = clock(duration);
+    if (duration) {
+      el.seek.value = String(Math.round((time / duration) * 1000));
+      el.seek.style.setProperty('--progress', `${(time / duration) * 100}%`);
     }
-    renderFind();
-  }, 350);
-}
-
-/**
- * Cue a found row: iTunes previews are ready as they arrive; an archive item
- * still needs its file list fetched, so its first play costs one request.
- */
-async function cueFind(index) {
-  const find = finds[index];
-  if (!find) return;
-
-  if (find.kind === 'youtube') {
-    const track = addTrack({
-      title: find.title,
-      artist: find.artist || 'YouTube',
-      url: find.url,
-      coverUrl: find.coverUrl,
-      source: 'youtube',
-    });
-    persist();
-    selectTrack(track.id);
-    return;
+    syncLyrics(time);
   }
 
-  if (find.kind === 'itunes') {
-    const track = addTrack({
-      title: find.title,
-      artist: find.artist,
-      album: find.album,
-      url: find.url,
-      coverUrl: find.coverUrl,
-      duration: find.duration,
-      source: 'itunes',
-    });
-    persist();
-    toastOnce('Apple previews are 30 seconds. The full song is at music.apple.com.');
-    selectTrack(track.id); // cueing is hearing it, not filing it away
-    return;
-  }
-
-  toastOnce('Fetching the file list…');
-  try {
-    const resolved = await resolveArchiveItem(find);
-    if (!resolved) {
-      toast('That item has no audio file.');
-      return;
-    }
-    const track = addTrack({
-      title: find.title,
-      artist: find.creator,
-      album: find.year ? String(find.year) : '',
-      url: resolved.url,
-      coverUrl: resolved.coverUrl,
-      duration: 0,
-      source: 'archive',
-    });
-    selectTrack(track.id);
-    el.search.value = '';
-    finds = [];
-    renderFind();
-    persist();
-  } catch (err) {
-    toast(`archive.org: ${err.message}`);
-  }
+  draw();
 }
 
-let onceTimer;
-function toastOnce(message) {
-  if (el.toast.hidden || el.toast.textContent !== message) toast(message);
-  clearTimeout(onceTimer);
-  onceTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
-}
-
-/* ── settings ───────────────────────────────────────────────────────────── */
-
-const STORE_KEY = 'izgiv.settings.v2';
+/* ── settings ──────────────────────────────────────────────────────────── */
 
 function persist() {
   try {
-    // URL-addressable tracks survive a reload: YouTube links, Apple previews
-    // and archive.org items can all be re-fetched. Local files cannot — their
-    // blob URLs die with the tab, which is already written on the tin.
-    const savedTracks = [...state.tracks.values()]
-      .filter((track) => ['youtube', 'itunes', 'archive'].includes(track.source))
+    const saved = [...state.tracks.values()]
+      .filter((t) => !t.local && t.url)
       .slice(-400)
       .map(({ id, ...track }) => track);
     localStorage.setItem(STORE_KEY, JSON.stringify({
       gains: state.gains,
-      volume: Number(el.volume.value),
+      volume: state.volume,
+      muted: state.muted,
+      source: state.source,
       shuffle: state.queue.shuffle,
       repeat: state.queue.repeat,
       nextId: state.nextId,
-      tracks: savedTracks,
+      tracks: saved,
     }));
   } catch {
-    /* private mode, or no storage: the app still plays */
+    /* private mode: the player still works */
   }
 }
 
@@ -994,188 +704,63 @@ function restore() {
   } catch {
     saved = {};
   }
+
   if (Array.isArray(saved.gains) && saved.gains.length === BANDS.length) {
     state.gains = saved.gains.map(clampGain);
   }
-  if (Number.isFinite(saved.volume)) el.volume.value = String(saved.volume);
+  if (Number.isFinite(saved.volume)) state.volume = Math.min(1, Math.max(0, saved.volume));
+  if (typeof saved.muted === 'boolean') state.muted = saved.muted;
+  if (SOURCES[saved.source]) state.source = saved.source;
   if (saved.shuffle) q.setShuffle(state.queue, true);
   if (['off', 'all', 'one'].includes(saved.repeat)) q.setRepeat(state.queue, saved.repeat);
 
-  if (Array.isArray(saved.tracks) && saved.tracks.length) {
-    const keep = saved.tracks.filter((track) =>
-      (track?.url) && ['youtube', 'itunes', 'archive'].includes(track.source));
-    if (keep.length) {
-      state.nextId = Math.max(Number(saved.nextId) || 0, state.nextId) || state.nextId;
-      for (const track of keep) {
-        const id = `t${state.nextId++}`;
-        state.tracks.set(id, { ...track, id });
-        state.ids.push(id);
-        q.append(state.queue, [id]);
-      }
-      state.nextId = Math.max(state.nextId, Number(saved.nextId) || 0);
+  if (Array.isArray(saved.tracks)) {
+    for (const track of saved.tracks.filter((t) => t && t.url && SOURCES[t.source])) {
+      addTrack(track);
     }
   }
+  state.nextId = Math.max(state.nextId, Number(saved.nextId) || 0);
 }
 
-/* ── wiring ─────────────────────────────────────────────────────────────── */
+/* ── wiring ────────────────────────────────────────────────────────────── */
 
 function syncControls() {
   el.shuffle.setAttribute('aria-pressed', String(state.queue.shuffle));
   el.repeat.setAttribute('aria-pressed', String(state.queue.repeat !== 'off'));
   el.repeatBadge.hidden = state.queue.repeat !== 'one';
-  const volume = Number(el.volume.value) / 100;
-  const muted = el.mute.getAttribute('aria-pressed') === 'true';
-  el.audio.volume = volume;
-  el.audio.muted = muted;
-  el.remote.volume = volume;
-  el.remote.muted = muted;
-  el.volume.style.setProperty('--progress', `${el.volume.value}%`);
-}
-
-/**
- * Add a YouTube link as a track.
- *
- * The title is fetched from YouTube's oEmbed endpoint, which is public and
- * carries no key; if the fetch is refused the video id stands in until the
- * player itself reports the real title.
- */
-/**
- * Mount a known YouTube id: add it to the library, fetch the real title
- * from YouTube's public oEmbed endpoint, and select it.
- */
-async function addYouTubeTrack(videoId) {
-  const track = addTrack({
-    title: videoId,
-    artist: 'YouTube',
-    url: videoId,
-    coverUrl: youTubeThumb(videoId),
-    source: 'youtube',
-  });
-
-  try {
-    const response = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=json`,
-    );
-    if (response.ok) {
-      const meta = await response.json();
-      track.title = meta.title || track.title;
-      track.artist = meta.author_name || 'YouTube';
-      renderLibrary();
-      if (state.currentId === track.id) {
-        el.title.textContent = track.title;
-        el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ');
-        document.title = `${track.title} — Waxwing`;
-      }
-    }
-  } catch {
-    /* offline, or oEmbed refused: the id is a workable label meanwhile */
-  }
-
-  selectTrack(track.id);
-}
-
-async function addYouTube() {
-  const input = prompt('Paste a YouTube link or video id:');
-  if (!input) return;
-
-  const videoId = youTubeId(input);
-  if (!videoId) {
-    toast('That does not look like a YouTube link.');
-    return;
-  }
-  await addYouTubeTrack(videoId);
-}
-
-/**
- * Add a link of any platform: a plain YouTube id goes straight to the embed
- * route; anything else is resolved by song.link (Odesli) across platforms.
- * From the summary, routes are offered as find rows: Apple's official
- * preview, full-length recordings from archive.org, and the YouTube embed.
- * Cues are left to the user, so one paste never silently plays three songs.
- */
-async function addAnyLink() {
-  const input = prompt('Paste any music link — YouTube, YouTube Music, Apple Music, Spotify, song.link:');
-  if (!input) return;
-
-  const videoId = youTubeId(input);
-  if (videoId) {
-    addYouTubeTrack(videoId);
-    return;
-  }
-
-  toastOnce('Resolving the link across platforms…');
-  try {
-    const response = await fetch(odesliUrl(input));
-    if (!response.ok) throw new Error(`song.link answered ${response.status}`);
-    const summary = summarizeOdesli(await response.json());
-    if (!summary) throw new Error('that link did not resolve to a song');
-
-    finds = [];
-    if (summary.youtubeId) {
-      finds.push({ kind: 'youtube', title: summary.title, artist: summary.artist, url: summary.youtubeId, coverUrl: youTubeThumb(summary.youtubeId) });
-    }
-    if (summary.appleId || summary.applePreview) {
-      const apple = summary.applePreview
-        ? { title: summary.title, artist: summary.artist, url: summary.applePreview, coverUrl: summary.coverUrl }
-        : await lookupiTunes(summary.appleId).catch(() => null);
-      if (apple?.url) finds.push({ kind: 'itunes', title: apple.title, artist: apple.artist, album: apple.album, url: apple.url, coverUrl: apple.coverUrl || summary.coverUrl, duration: apple.duration });
-    }
-    if (summary.title) {
-      const archiveResults = await searchArchive([summary.artist, summary.title].filter(Boolean).join(' ')).catch(() => []);
-      finds.push(...archiveResults.slice(0, 6).map((row) => ({ kind: 'archive', ...row })));
-    }
-
-    if (!finds.length) {
-      toast('Nothing playable found for that link.');
-      return;
-    }
-    renderFind();
-    toastOnce(`${finds.length} route${finds.length === 1 ? '' : 's'} found — pick one to cue.`);
-  } catch (err) {
-    console.warn('odesli:', err.message);
-    // song.link unreachable or the link unknown: fall back to searching the
-    // pasted text as a query, which is what a human would have typed.
-    toastOnce(`song.link: ${err.message} — searching the pasted text instead.`);
-    el.search.value = input;
-    scheduleFind();
-  }
+  el.mute.setAttribute('aria-pressed', String(state.muted));
+  el.volume.value = String(Math.round(state.volume * 100));
+  player.setVolume(state.volume);
+  player.setMuted(state.muted);
 }
 
 function wire() {
-  el.importBtn.addEventListener('click', () => el.fileInput.click());
-  // One button for every link: plain YouTube links go straight to the
-  // embed route; the rest go through song.link first.
-  el.ytBtn.addEventListener('click', addAnyLink);
-  el.fileInput.addEventListener('change', () => {
-    addFiles(el.fileInput.files);
-    el.fileInput.value = '';
-  });
-
-  el.demoBtn.addEventListener('click', () => {
-    const demo = [...state.tracks.values()].find((t) => t.demo);
-    if (demo) selectTrack(demo.id);
-    else loadDemo().then(() => {
-      const found = [...state.tracks.values()].find((t) => t.demo);
-      if (found) selectTrack(found.id);
+  for (const tab of document.querySelectorAll('.tab')) {
+    tab.addEventListener('click', () => {
+      setSource(tab.dataset.source);
+      runSearch();
     });
-  });
+  }
 
-  el.search.addEventListener('input', () => {
-    renderLibrary();
-    scheduleFind();
+  el.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runSearch();
   });
-
-  el.find.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-find]');
-    if (button) cueFind(Number(button.dataset.find));
-  });
+  el.search.addEventListener('input', scheduleSearch);
 
   el.library.addEventListener('click', (event) => {
     const button = event.target.closest('.library-item');
     if (button) selectTrack(button.dataset.id);
   });
 
-  el.play.addEventListener('click', togglePlay);
+  el.play.addEventListener('click', () => {
+    if (!state.currentId) {
+      const first = state.queue.ids[0];
+      if (first) selectTrack(first);
+      return;
+    }
+    player.toggle();
+  });
   el.next.addEventListener('click', () => step(1));
   el.prev.addEventListener('click', () => step(-1));
 
@@ -1197,101 +782,69 @@ function wire() {
 
   el.seek.addEventListener('input', () => {
     state.seeking = true;
-    const audio = activeAudio();
-    const duration = audio?.duration || 0;
+    const duration = player.duration();
     const fraction = Number(el.seek.value) / 1000;
     el.seek.style.setProperty('--progress', `${fraction * 100}%`);
-    if (youTubeUpToDate()) {
-      const ytDuration = youTube.player.getDuration?.() || 0;
-      el.current.textContent = clock(fraction * ytDuration);
-      return;
-    }
-    el.current.textContent = clock(fraction * duration);
+    el.timeCurrent.textContent = clock(fraction * duration);
   });
-
   el.seek.addEventListener('change', () => {
-    const fraction = Number(el.seek.value) / 1000;
-    if (youTubeUpToDate()) {
-      const duration = youTube.player.getDuration?.() || 0;
-      if (duration) youTube.player.seekTo(fraction * duration, true);
-    } else {
-      const audio = activeAudio();
-      const duration = audio?.duration || 0;
-      if (duration) audio.currentTime = fraction * duration;
-    }
     state.seeking = false;
+    player.seek((Number(el.seek.value) / 1000) * player.duration());
   });
 
   el.volume.addEventListener('input', () => {
-    syncControls();
-    // The EQ's preamp does not touch this path: YouTube's own player holds
-    // its volume.
-    youTube.player?.setVolume?.(Number(el.volume.value));
+    state.volume = Number(el.volume.value) / 100;
+    player.setVolume(state.volume);
     persist();
   });
 
   el.mute.addEventListener('click', () => {
-    const muted = el.mute.getAttribute('aria-pressed') === 'true';
-    el.mute.setAttribute('aria-pressed', String(!muted));
-    if (youTube.player) (!muted ? youTube.player.unMute?.() : youTube.player.mute?.());
+    state.muted = !state.muted;
+    player.setMuted(state.muted);
     syncControls();
+    persist();
   });
 
   el.eqToggle.addEventListener('click', () => {
-    // The filters sit between the local audio element and the speakers. A
-    // YouTube track bypasses that path entirely, so say so once instead of
-    // letting someone push a slider that cannot do anything.
-    const source = currentTrack()?.source;
-    if ((source === 'youtube' || source === 'itunes' || source === 'archive') && el.eqPanel.hidden) {
-      toast('The equalizer shapes local files only. Streamed audio brings its own.');
-    }
-    el.eqPanel.hidden = !el.eqPanel.hidden;
+    const opening = el.eqPanel.hidden;
+    el.eqPanel.hidden = !opening;
+    el.eqToggle.setAttribute('aria-expanded', String(opening));
   });
-  el.eqClose.addEventListener('click', () => { el.eqPanel.hidden = true; });
-
-  el.eqPanel.addEventListener('click', (event) => {
+  el.eqClose.addEventListener('click', () => {
+    el.eqPanel.hidden = true;
+    el.eqToggle.setAttribute('aria-expanded', 'false');
+  });
+  el.eqPresets.addEventListener('click', (event) => {
     const chip = event.target.closest('[data-preset]');
     if (chip) applyPreset(chip.dataset.preset);
   });
 
-  el.audio.addEventListener('play', () => document.body.classList.add('is-playing'));
-  el.audio.addEventListener('pause', () => document.body.classList.remove('is-playing'));
-  el.remote.addEventListener('play', () => document.body.classList.add('is-playing'));
-  el.remote.addEventListener('pause', () => document.body.classList.remove('is-playing'));
+  el.importBtn.addEventListener('click', () => el.fileInput.click());
+  el.fileInput.addEventListener('change', () => {
+    addFiles(el.fileInput.files);
+    el.fileInput.value = '';
+  });
 
-  // Both transport elements share one set of behaviours; the element under
-  // them changes, the instincts do not.
-  for (const audio of [el.audio, el.remote]) {
-    audio.addEventListener('loadedmetadata', () => {
-      el.total.textContent = clock(audio.duration);
-      const track = state.tracks.get(state.currentId);
-      if (track && Number.isFinite(audio.duration)) {
-        track.duration = audio.duration;
-        renderLibrary();
-      }
-    });
+  el.clearBtn.addEventListener('click', () => {
+    player.unload();
+    state.currentId = null;
+    state.tracks.clear();
+    state.queue = q.createQueue([]);
+    state.lyrics = null;
+    el.lyrics.hidden = true;
+    el.lyricsLines.replaceChildren();
+    el.title.textContent = 'Nothing cued';
+    el.titleGhost.textContent = 'Nothing cued';
+    el.subtitle.textContent = 'Search a catalogue, or drop your own files anywhere on this page.';
+    el.art.removeAttribute('src');
+    el.art.style.display = 'none';
+    setAccent(null);
+    renderLibrary();
+    persist();
+    toast('The crate is empty.');
+  });
 
-    audio.addEventListener('timeupdate', () => {
-      const duration = audio.duration || 0;
-      if (!state.seeking) {
-        el.current.textContent = clock(audio.currentTime);
-        el.seek.value = duration ? String(Math.round((audio.currentTime / duration) * 1000)) : '0';
-        el.seek.style.setProperty('--progress', `${duration ? (audio.currentTime / duration) * 100 : 0}%`);
-      }
-      syncLyrics(audio.currentTime);
-    });
-
-    audio.addEventListener('ended', () => {
-      const nextId = q.next(state.queue, { automatic: true });
-      if (nextId) selectTrack(nextId);
-      else {
-        document.body.classList.remove('is-playing');
-        audio.currentTime = 0;
-      }
-    });
-  }
-
-  // Drop anywhere. The window is the target so a miss does not navigate away.
+  // Drop anywhere on the window, so a miss does not navigate away.
   let dragDepth = 0;
   window.addEventListener('dragenter', (event) => {
     event.preventDefault();
@@ -1314,71 +867,50 @@ function wire() {
     const tag = event.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || event.metaKey || event.ctrlKey) return;
 
-    // Works for every source: five seconds is five seconds.
-    const duration = youTubeUpToDate()
-      ? youTube.player.getDuration?.() || 0
-      : activeAudio()?.duration || 0;
-
     switch (event.key) {
       case ' ':
         event.preventDefault();
-        togglePlay();
+        el.play.click();
         break;
-      case 'ArrowRight': {
-        const target = Math.min(duration, (youTubeUpToDate()
-          ? youTube.player.getCurrentTime?.() || 0
-          : activeAudio()?.currentTime || 0) + 5);
-        if (youTubeUpToDate()) youTube.player.seekTo(target, true);
-        else if (activeAudio()) activeAudio().currentTime = target;
+      case 'ArrowRight':
+        player.seek(player.time() + 5);
         break;
-      }
-      case 'ArrowLeft': {
-        const target = Math.max(0, (youTubeUpToDate()
-          ? youTube.player.getCurrentTime?.() || 0
-          : activeAudio()?.currentTime || 0) - 5);
-        if (youTubeUpToDate()) youTube.player.seekTo(target, true);
-        else if (activeAudio()) activeAudio().currentTime = target;
+      case 'ArrowLeft':
+        player.seek(player.time() - 5);
         break;
-      }
       case 'n': step(1); break;
       case 'p': step(-1); break;
-      case 'm':
-        el.mute.click();
-        break;
-      case 'e':
-        el.eqToggle.click();
-        break;
-      default:
-        break;
+      case 'm': el.mute.click(); break;
+      case 'e': el.eqToggle.click(); break;
+      default: break;
     }
   });
 }
 
-/* ── boot ───────────────────────────────────────────────────────────────── */
+/* ── boot ──────────────────────────────────────────────────────────────── */
 
 async function boot() {
   window.addEventListener('error', (event) => {
-    const box = $('boot-error');
-    box.textContent = `Waxwing could not start.\n\n${event.message}`;
-    box.hidden = false;
     document.documentElement.dataset.ready = 'error';
+    toast(`Waxwing could not start: ${event.message}`);
   });
 
+  player.setGains(state.gains);
   restore();
-  wire();
+  setSource(state.source);
   renderEq();
   syncControls();
+  wire();
   renderLibrary();
-  setAccent({ r: 198, g: 148, b: 92 });
-  draw();
+  requestAnimationFrame(tick);
   await loadDemo();
   syncControls();
-
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
 
   document.documentElement.dataset.ready = 'ready';
 }
 
 boot();
+
+// A handle for the smoke test and for debugging in the console. Not part of
+// the UI; nothing here is required for the player to work.
+window.__wax = { player, state, setAccent };

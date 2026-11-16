@@ -140,6 +140,21 @@ export function ensureReadable(color, { minLightness = 0.56, maxLightness = 0.72
   return fromHsl({ h: hsl.h, s: saturation, l: lightness });
 }
 
+/**
+ * Pull a cover colour into a band that reads on *paper*.
+ *
+ * The dark-theme twin of `ensureReadable`, and the same idea: move lightness
+ * on its own in HSL, keep the hue, and give a near-grey cover enough
+ * saturation to look chosen. Here the target band is dark, because the accent
+ * is used as ink on a warm off-white page.
+ */
+export function ensureOnPaper(color, { minLightness = 0.14, maxLightness = 0.3 } = {}) {
+  const hsl = toHsl(color);
+  const lightness = Math.min(maxLightness, Math.max(minLightness, hsl.l));
+  const saturation = hsl.s < 0.18 ? 0.4 : Math.min(0.85, hsl.s);
+  return fromHsl({ h: hsl.h, s: saturation, l: lightness });
+}
+
 export function css({ r, g, b }, alpha = 1) {
   return alpha === 1 ? `rgb(${r} ${g} ${b})` : `rgb(${r} ${g} ${b} / ${alpha})`;
 }

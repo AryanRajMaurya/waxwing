@@ -1,55 +1,180 @@
 <!doctype html>
-<html lang="en" data-ready="loading">
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Waxwing</title>
-  <meta name="description" content="Your music, the world’s wax. In the browser. No uploads. No install." />
-  <meta name="theme-color" content="#0c0a09" />
-  <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="app.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waxwing — a crate-digger that plays</title>
+<meta name="description" content="A static web music player. Deezer previews, Internet Archive and NCS full-length, Apple previews, and your own files — one queue, one page.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
 </head>
+<body data-ready="boot" data-mode="web">
 
-<body>
-  <div class="ambient" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
 
-  <nav class="topbar" role="navigation">
-    <div class="brand" role="heading" aria-level="1">
-      <span class="brand-mark" aria-hidden="true">I</span>
-      <span class="brand-name">WAXWING</span>
-      <span class="brand-tag">your files, the world’s wax</span>
-    </div>
-    <div class="topbar-actions" role="search">
-      <div class="search-wrapper">
-        <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
-        <input id="search" type="search" placeholder="Search library or paste a link" autocomplete="off" />
-      </div>
-      <div class="action-buttons">
-        <button class="btn import">Add music</button>
-        <button class="btn ghost import-link">Add link</button>
-        <button class="btn ghost play-demo">Demo</button>
-      </div>
-      <input id="file-input" type="file" accept="audio/*,.lrc" multiple hidden />
-      <label for="file-input" class="btn ghost reveal">Drop music</label>
-    </div>
-  </nav>
-
-  <div class="main">
-    <section class="library" aria-label="Library">
-      <header class="library-header">
-        <h2>Library</h2>
-        <span class="library-count">0 tracks</span>
-      </header>
-
-      <div class="empty-state">
-        <span class="empty-icon">🎵</span>
-        <h3>Drop music anywhere</h3>
-        <p>MP3, FLAC, OGG, M4A, WAV. Tags and cover art are read in the browser — the files never leave this machine.</p>
-      </div>
-
-      <ul class="library-list"></ul>
-    </section>
+<header class="masthead">
+  <div class="masthead-rule">
+    <h1 class="wordmark">Waxwing<span class="wordmark-stop">.</span></h1>
+    <p class="edition">
+      <span id="edition-source">Deezer</span>
+      <span class="edition-sep" aria-hidden="true">/</span>
+      <span id="edition-counts">0 in the crate</span>
+      <span class="edition-sep" aria-hidden="true">/</span>
+      <span>no account · no upload · static files</span>
+    </p>
   </div>
+</header>
+
+<main class="sheet">
+
+  <!-- ── find ─────────────────────────────────────────────────────────── -->
+  <section class="rail" aria-labelledby="find-heading">
+    <h2 class="col-title" id="find-heading">Find</h2>
+
+    <div class="tabs" role="tablist" aria-label="Catalogue">
+      <button type="button" role="tab" class="tab" data-source="deezer" aria-selected="true">Deezer</button>
+      <button type="button" role="tab" class="tab" data-source="archive" aria-selected="false">Archive</button>
+      <button type="button" role="tab" class="tab" data-source="itunes" aria-selected="false">Apple</button>
+      <button type="button" role="tab" class="tab" data-source="ncs" aria-selected="false">NCS</button>
+    </div>
+
+    <form class="search" id="search-form" role="search">
+      <label class="visually-hidden" for="search">Search the selected catalogue</label>
+      <input id="search" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search the Deezer catalogue">
+      <button type="submit" class="btn btn-ink">Search</button>
+    </form>
+
+    <p class="source-note" id="source-note"></p>
+
+    <p class="results-status" id="results-status" role="status" aria-live="polite"></p>
+    <ul class="results" id="results"></ul>
+
+    <div class="rail-foot">
+      <h3>Keys</h3>
+      <ul class="keys">
+        <li><span>Play / pause</span><kbd>space</kbd></li>
+        <li><span>Seek five seconds</span><kbd>&larr; &rarr;</kbd></li>
+        <li><span>Next / previous</span><kbd>n / p</kbd></li>
+        <li><span>Mute</span><kbd>m</kbd></li>
+        <li><span>Equaliser</span><kbd>e</kbd></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── now playing ──────────────────────────────────────────────────── -->
+  <section class="stage" aria-labelledby="title">
+    <div class="plate">
+      <div class="plate-offset" aria-hidden="true"></div>
+      <img class="art" id="art" alt="Cover art for the current track">
+    </div>
+
+    <h2 class="track-title" id="title">
+      <span class="title-ghost" aria-hidden="true"></span>
+      <span class="title-ink" id="title-text">Nothing cued</span>
+    </h2>
+    <p class="track-sub" id="subtitle">Search a catalogue, or drop your own files anywhere on this page.</p>
+
+    <div class="lyrics" id="lyrics" hidden>
+      <ul class="lyrics-lines" id="lyrics-lines"></ul>
+    </div>
+
+    <div class="viz-strip">
+      <canvas id="visualizer" aria-hidden="true"></canvas>
+    </div>
+
+    <div class="scrub">
+      <span class="time" id="time-current">0:00</span>
+      <label class="visually-hidden" for="seek">Seek</label>
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1">
+      <span class="time" id="time-total">0:00</span>
+    </div>
+
+    <div class="transport">
+      <button type="button" class="btn btn-transport" id="prev" aria-label="Previous track">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2v12M13 2v12M13 8 6 3v10z"/></svg>
+      </button>
+      <button type="button" class="btn btn-transport btn-play" id="play" aria-label="Play">
+        <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2l10 6-10 6z"/></svg>
+        <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h4v12H3zM9 2h4v12H9z"/></svg>
+      </button>
+      <button type="button" class="btn btn-transport" id="next" aria-label="Next track">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 2v12M3 2v12M3 8l7 5V3z"/></svg>
+      </button>
+      <span class="transport-gap" aria-hidden="true"></span>
+      <button type="button" class="btn btn-transport" id="shuffle" aria-pressed="false" aria-label="Shuffle">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 4h3l8 8h3M1 12h3l2-2M9 6l2-2h4M12 2l3 3-3 3M12 9l3 3-3 3"/></svg>
+      </button>
+      <button type="button" class="btn btn-transport" id="repeat" aria-pressed="false" aria-label="Repeat">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6V5a2 2 0 0 1 2-2h6l-2-2M13 10v1a2 2 0 0 1-2 2H5l2 2"/></svg>
+        <span class="repeat-badge" id="repeat-badge" hidden>1</span>
+      </button>
+    </div>
+
+    <div class="volume-row">
+      <button type="button" class="btn btn-transport" id="mute" aria-pressed="false" aria-label="Mute">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6v4h3l4 3V3L5 6H2zM11 5a4 4 0 0 1 0 6"/></svg>
+      </button>
+      <label class="visually-hidden" for="volume">Volume</label>
+      <input type="range" id="volume" min="0" max="100" value="80" step="1">
+      <button type="button" class="btn btn-eq" id="eq-toggle" aria-expanded="false" aria-controls="eq-panel">EQ</button>
+    </div>
+
+    <div class="eq-panel" id="eq-panel" hidden>
+      <div class="eq-head">
+        <h3>Equaliser</h3>
+        <button type="button" class="btn btn-small" id="eq-close">Close</button>
+      </div>
+      <div class="eq-presets" id="eq-presets">
+        <button type="button" class="chip" data-preset="flat">Flat</button>
+        <button type="button" class="chip" data-preset="warm">Warm</button>
+        <button type="button" class="chip" data-preset="vocal">Vocal</button>
+        <button type="button" class="chip" data-preset="night">Night</button>
+      </div>
+      <div class="eq-bands" id="eq-sliders"></div>
+      <p class="eq-note" id="eq-note">Shapes sources that reach the Web Audio graph. NCS streams in HTML5 mode and keep their own sound.</p>
+    </div>
+  </section>
+
+  <!-- ── running order ───────────────────────────────────────────────── -->
+  <aside class="queue" aria-labelledby="queue-heading">
+    <h2 class="col-title" id="queue-heading">Running order</h2>
+
+    <div class="queue-tools">
+      <button type="button" class="btn btn-ink" id="import-btn">Add files</button>
+      <button type="button" class="btn" id="clear-btn">Clear</button>
+    </div>
+
+    <p class="queue-count" id="library-count">0 tracks</p>
+    <ul class="library" id="library"></ul>
+
+    <div class="empty" id="empty">
+      <p class="empty-rule" aria-hidden="true"></p>
+      <p>The crate is empty.</p>
+      <p class="empty-sub">Drop MP3, FLAC, OGG, Opus, M4A or WAV anywhere on this page — tags and cover art come along. A <code>.lrc</code> beside its audio scrolls the words.</p>
+    </div>
+
+    <div class="queue-foot">
+      <h3>Notes</h3>
+      <ul class="notes">
+        <li>Deezer and Apple rows are 30-second previews — the honest length of what those catalogues give away.</li>
+        <li>Archive and NCS rows are full-length and licensed for reuse.</li>
+        <li>Your own files never leave this page; their object URLs die with the tab.</li>
+      </ul>
+    </div>
+  </aside>
+
+</main>
+
+<footer class="colophon">
+  <p>Waxwing — static files, no build step. Sources: Deezer · Internet Archive · Apple · NCS. Not a shop: previews are previews, full-length is licensed.</p>
+</footer>
+
+<input type="file" id="file-input" multiple hidden
+       accept="audio/*,.mp3,.flac,.ogg,.oga,.opus,.m4a,.aac,.wav,.lrc">
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/howler.min.js"></script>
+<script type="module" src="src/app.js"></script>
 </body>
 </html>

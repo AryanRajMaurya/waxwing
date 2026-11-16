@@ -1,165 +1,110 @@
 # Waxwing
 
-**A crate-digger that plays.** Type a name — hear it: full-length concerts and
-Creative Commons records from the Internet Archive, Apple's official
-30-second previews of the mainstream catalogue, your own files, YouTube —
-one queue, one page. Nothing is uploaded, there is no account, and there is
-nothing to install.
+**A crate-digger that plays, on paper.** Type a name — hear it: 30-second
+previews from Deezer and Apple, full-length recordings from the Internet
+Archive and NoCopyrightSounds, and your own files. One queue, one page, no
+account, no upload, no build step.
 
-[**Open the player →**](https://aryanrajmaurya.github.io/waxwing/)
-
-![Waxwing playing the demo track: cover art, the accent taken from it, scrolling lyrics and a spectrum visualiser](docs/player.png)
-
-## Why this exists
-
-The first IZGIV was an Electron app. It had the warm glass, the equaliser and
-the cover-derived colour, but getting it running meant a native build and a
-lockfile that resolved a `git+ssh` dependency — which fails on any machine
-without a GitHub key. An installer that breaks is a hard thing to hand to
-someone who just wants to hear an album.
-
-This is the remake. The parts people actually used are here; the parts that
-made it fragile are gone. There is no sidecar process, no native module and no
-build step — the whole player is static files, so any static host will serve
-it.
-
-## What it does
-
-- **Resolves any link through song.link (Odesli).** The *Add link* button
-  takes any music URL — YouTube Music, Apple Music, Spotify, song.link share
-  links — and Odesli's public API reports the same song across platforms.
-  From that one mapping the player offers every route it honestly can: the
-  official Apple preview, full-length archive.org recordings, and the
-  YouTube embed — pick one and cue it. When song.link is unreachable it
-  falls back to searching the pasted text.
-- **Finds the song, from sources that are theirs to give.** Type into the
-  search box and both find-sources answer at once:
-  - **Internet Archive** — full-length recordings: the Live Music Archive
-    (thousands of concert recordings the performers themselves released),
-    Creative Commons uploads, and a century of pre-copyright wax. The best
-    audio file is picked per item — never a 300 MB FLAC between someone and
-    a song — and it streams full-length.
-  - **iTunes** — the mainstream catalogue, as Apple itself grants it: the
-    official 30-second preview, real artwork and metadata, and a link to
-    where the song is sold. A refresh on what wax is, not a replacement for
-    buying it.
-  Deliberately not built: scraping download rips of the mainstream catalogue.
-  The previews and the Archive require no key and no scraping, and a player
-  built on someone else's stolen files isn't worth the domain it runs on.
-- **Plays the files you drop on it.** MP3, FLAC, OGG, Opus, M4A, WAV — whatever
-  the browser can decode. The picker, drag-and-drop and a folder-sized drop all
-  work.
-- **Plays YouTube, inside YouTube.** Press the *YouTube* button and paste a
-  link (or an id): the video plays in the art frame in YouTube's own embed,
-  joins the queue with local tracks, and its title and channel are fetched
-  from YouTube's oEmbed endpoint — no key involved. Honest limits: the audio
-  never leaves YouTube's player, so the equaliser and the spectrum (which work
-  by routing the sound through the Web Audio graph) don't apply to YouTube
-  tracks. Lyrics still follow the clock.
-- **Reads the tags, including the cover.** Title, artist, album, track, year
-  and genre come out of the file, and the embedded picture becomes the artwork
-  and the source of the accent colour. No tag? The filename is split into
-  artist and title instead.
-- **Follows `.lrc` lyrics.** Drop a `.lrc` next to its audio (or into the same
-  drop) and the lines scroll in time, with the active line lifted out. Multiple
-  timestamps per line, `[offset:]` and the `[ti:]`/`[ar:]` headers are handled.
-- **Ten-band equaliser.** 32 Hz to 16 kHz, with flat/warm/vocal/night presets
-  and a preamp that moves opposite to the largest boost so nothing clips.
-- **Shuffle that doesn't repeat itself.** Tracks are shuffled into a bag and
-  every track plays once before any plays twice, the way a shuffle is supposed
-  to work. Repeat can be off, all or one.
-- **A visualiser that reads like a spectrum.** 56 logarithmically spaced bands
-  from 40 Hz to 14 kHz, drawn from the analyser after the EQ.
-- **Remembers your settings.** Volume, EQ, shuffle and repeat survive a reload.
-- **Works offline.** A service worker caches the shell, so the player opens
-  without a network. Your music is never cached — it is your file, not ours.
-
-### Keyboard
-
-| Key | Action |
-|---|---|
-| `Space` | Play / pause |
-| `←` `→` | Seek 5 seconds |
-| `n` / `p` | Next / previous track |
-| `m` | Mute |
-| `e` | Equaliser |
-
-## How it works
-
-Nothing is bundled. The modules are plain ES modules loaded by the browser:
-
-| File | Job |
-|---|---|
-| `src/tags.js` | ID3v2.2 / v2.3 / v2.4 reader — text frames and `APIC` cover art |
-| `src/lrc.js` | `.lrc` parser: timestamps, offsets, multiple stamps per line |
-| `src/color.js` | Dominant colour from the cover, lifted into a readable accent |
-| `src/eq.js` | The ten filters, presets, and the preamp calculation |
-| `src/queue.js` | Play order, shuffle bag, repeat, previous/next |
-| `src/yt.js` | YouTube URLs → video id, the IFrame API contract |
-| `src/wax.js` | The two find-sources: iTunes (JSONP) and archive.org (search, metadata, file choice) |
-| `src/app.js` | The UI, the Web Audio graph and the playback loop |
-
-Three decisions worth knowing about:
-
-**Tags are read from the first megabyte.** A 60 MB FLAC should not be read into
-memory to show a title. ID3 tags live at the front of the file, so the player
-slices a megabyte, parses that, and hands the whole file to the audio element as
-an object URL.
-
-**The accent is not the average colour.** Averaging a cover lands on mud,
-because most covers are mostly one dull background. The parser buckets pixels
-by hue, scores each bucket by how saturated it is and how much area it covers,
-and takes the winner. The result is then moved in HSL — not scaled — until it
-reads on a near-black page.
-
-**The visualiser is log-spaced.** Linear FFT bars spend their first three bars
-on the bass and leave the rest dark. Hearing is logarithmic, so the bars are
-too: each bar owns every bin between its lower and upper edge.
-
-## Formats and tags, honestly
-
-- **Tags:** MP3 via ID3v2 (v2.2, v2.3, v2.4), including embedded JPEG and PNG
-  cover art.
-- **FLAC, OGG, Opus, M4A, WAV:** these play, but their tags are not parsed yet,
-  so the title comes from the filename. FLAC and Vorbis comments are the
-  obvious next addition.
-- **Browser support:** current Chrome, Edge, Firefox and Safari. The player
-  needs ES modules, the Web Audio API and object URLs, all of which have been
-  available for years.
-
-## Run it locally
-
-There is no build step and there are no dependencies.
+## Run it
 
 ```bash
-git clone https://github.com/AryanRajMaurya/izgiv
-cd izgiv
+cd waxwing-player
 python3 -m http.server 8000 --bind 127.0.0.1
 # open http://127.0.0.1:8000
 ```
 
-A server is required: browsers refuse to load ES modules from `file://`, and
-the demo track and service worker are fetched over HTTP.
+A server is required: browsers refuse to load ES modules from `file://`.
+
+## What it does
+
+- **Four catalogues, no keys.** Deezer (30″ MP3 previews, cover art), Apple
+  (30″ previews), the Internet Archive (full-length, performer-permitted and
+  Creative Commons), and NCS (full-length, free to use). Every row is labelled
+  with the source and with what that source can honestly do.
+- **Your own files.** MP3, FLAC, OGG, Opus, M4A, WAV — picker or drag-and-drop.
+  ID3v2 tags and the embedded cover are read from the first megabyte, so a big
+  FLAC does not stall the page.
+- **Lyrics.** Drop a `.lrc` beside its audio, or into the same drop. Timestamps,
+  `[offset:]`, multiple stamps per line and the `[ti:]`/`[ar:]` headers are
+  handled; the active line is lifted out and follows the clock.
+- **Ten-band equaliser.** 32 Hz to 16 kHz, flat/warm/vocal/night presets, and a
+  preamp that moves opposite to the largest boost so nothing clips.
+- **A spectrum that reads like one.** 56 logarithmically spaced bands from 40 Hz
+  to 14 kHz, drawn after the EQ.
+- **Shuffle that does not repeat itself**, and repeat off/all/one.
+- **Remembers your settings** — volume, EQ, shuffle, repeat, and the
+  URL-addressable tracks. Local files cannot survive a reload; their blob URLs
+  die with the tab, and the UI says so.
+- **Keyboard.** `space` play/pause, `←` `→` seek five seconds, `n`/`p` next and
+  previous, `m` mute, `e` equaliser.
+
+## How it works
+
+Nothing is bundled except Howler. The modules are plain ES modules:
+
+| File | Job |
+|---|---|
+| `src/sources.js` | The four catalogues, and the honest limits of each |
+| `src/player.js` | Howler transport, and the one reroute that hangs an EQ off it |
+| `src/eq.js` | The ten filters, presets, preamp |
+| `src/viz.js` | Spectrum geometry (log-spaced bands, tiled bin edges) |
+| `src/queue.js` | Play order, shuffle bag, repeat |
+| `src/tags.js` | ID3v2.2 / v2.3 / v2.4 reader, text frames and `APIC` art |
+| `src/lrc.js` | `.lrc` parser |
+| `src/color.js` | Dominant colour from a cover, lifted into a readable accent |
+| `src/app.js` | The UI and the playback loop |
+
+### The one integration trick
+
+Howler owns transport. It does not expose a place to hang an equaliser — every
+sound ends at `Howler.masterGain`, and that node is public. So the player
+unplugs it from the speakers and plugs it into its own chain:
+
+```
+sound -> Howler.masterGain -> preamp -> 10 bands -> analyser -> speakers
+```
+
+The EQ and the visualiser then apply to every Web Audio sound.
+
+### Where each source can go
+
+| Source | Search | Audio | Equaliser |
+|---|---|---|---|
+| Deezer | JSONP — the endpoint sends no CORS header | CORS `*`, ~320 kbps MP3 | yes |
+| Apple | JSONP | CORS `*`, M4A | yes |
+| Internet Archive | `fetch`, CORS `*` | CORS `*` | yes |
+| NCS | local catalogue, no network | S3, **no CORS header** | no — HTML5 mode |
+| Your files | — | blob URL, same-origin | yes |
+
+NCS is the one compromise. `ncs.io` has no public API and its S3 bucket refuses
+listing, so `tools/scrape-ncs.py` freezes the library into `catalog/ncs.json`
+(234 tracks, regenerated on demand) and the player loads that static file. The
+audio host sends no CORS header, so those tracks play in HTML5 mode: full sound,
+no equaliser, and the UI says so rather than quietly pretending otherwise.
+
+## The look
+
+A printed broadsheet, not a dashboard: warm paper, one ink, a spot colour lifted
+from the cover, hard rules instead of shadows, and one flourish a print shop
+earns — the title overprinted twice, a third of a centimetre out of register.
+The grain is an inline SVG turbulence, so there is no image request.
+
+Design references used: getlayers.ai, mobbin.com, cta.gallery,
+grainient.supply, reelfolio.io.
 
 ## Tests
 
 ```bash
-npm test
+npm test                          # 62 unit tests, node --test, no dependencies
+node tools/verify-ui.mjs          # 18 browser checks; needs the server running
+python3 tools/scrape-ncs.py       # regenerate catalog/ncs.json
 ```
 
-The pure modules — tags, lyrics, colour, EQ, queue — run under `node --test`
-with no framework and no dependencies. CI also boots the page in headless
-Chrome and fails if it does not reach `data-ready="ready"` with the demo loaded,
-because unit tests cannot tell you that a page is blank.
+`tools/verify-ui.mjs` needs Playwright and a Chromium executable; set
+`PW_MODULE` and `PW_EXECUTABLE_PATH` if they are not in the usual place.
 
-## The demo track
+## Licence
 
-The demo, *Glass*, is generated rather than sampled: `demo/make-demo.mjs`
-synthesises four chords, a bass, a bell arpeggio and some filtered air, writes a
-WAV, and the README in that file shows the one `ffmpeg` command that muxes it
-with the cover into `demo/demo.mp3`. No sample licences, and the file is
-reproducible byte for byte.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Howler.js is MIT, by James Simpson. Music belongs
+to its owners; previews are previews and the full-length sources are the ones
+their performers and licensors give away.
