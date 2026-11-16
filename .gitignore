@@ -1,6 +1,0 @@
-# Dependencies and build output never belong in the repo.
-node_modules/
-package-lock.json
-
-# The demo WAV is generated; the muxed demo.mp3 is shipped.
-*.wav

@@ -15,6 +15,20 @@ python3 -m http.server 8000 --bind 127.0.0.1
 
 A server is required: browsers refuse to load ES modules from `file://`.
 
+## Deploy
+
+Two places it lives, from the same tree:
+
+- **GitHub Pages** — `AryanRajMaurya/waxwing`, at
+  https://aryanrajmaurya.github.io/waxwing/. Push through the mirror clone at
+  `~/waxwing-publish` (see the waxwing skill's `references/player-project.md`).
+- **Antideploy** — the app `hermes`, at https://hermes.antideploy.app.
+  `.antideploy.json` holds the application id; deploy with
+  `tar czf - . | curl -X POST "https://antideploy.com/api/v1/deploy?applicationId=<id>" -H "Authorization: Bearer $TOKEN" -F "archive=@-"`.
+
+`vendor/` is on Antideploy's ignore list, which is why the library is at
+`assets/howler.js` rather than beside the source. GitHub Pages serves either.
+
 ## What it does
 
 - **Four catalogues, no keys.** Deezer (30″ MP3 previews, cover art), Apple
