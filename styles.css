@@ -127,7 +127,7 @@ body {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   border-bottom: var(--rule);
   margin-top: 0.9rem;
 }
@@ -484,6 +484,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+input[type="range"]:disabled { opacity: 0.3; cursor: default; }
 
 .eq-panel {
   margin-top: 1rem;

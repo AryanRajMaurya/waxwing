@@ -116,6 +116,10 @@ try {
   const crate = await page.locator('.library-item').count();
   check('the cued track joins the running order', crate === 2, `${crate} tracks`);
 
+  // Lyrics: the demo's came from its .lrc; a Deezer cue should fetch them.
+  const remoteLyrics = await page.locator('#lyrics-lines li').count();
+  check('lyrics are fetched from LRClib when there is no .lrc', remoteLyrics > 0, `${remoteLyrics} lines`);
+
   // Hero shot: a Web Audio track playing, so the spectrum is live.
   await page.waitForTimeout(1200);
   await page.screenshot({ path: 'docs/player.png', fullPage: true });
@@ -131,6 +135,43 @@ try {
     await page.waitForTimeout(1500);
     const mode = await page.evaluate(() => document.body.dataset.mode);
     check('NCS is labelled as HTML5 playback', mode === 'html5', `data-mode=${mode}`);
+  }
+
+  // SomaFM: a live channel, resolved from its playlist, with no scrubber.
+  await page.getByRole('tab', { name: 'SomaFM' }).click();
+  await page.locator('#search').fill('groove');
+  await page.waitForTimeout(1500);
+  const somaRows = await page.locator('.result').count();
+  check('SomaFM lists channels', somaRows > 0, `${somaRows} rows`);
+  if (somaRows) {
+    await page.locator('.result').first().click();
+    await page.waitForTimeout(6000);
+    const live = await page.evaluate(() => ({
+      clock: document.getElementById('time-current').textContent,
+      seekDisabled: document.getElementById('seek').disabled,
+      playing: window.__wax.player.playing(),
+      meta: document.querySelector('.library-item[aria-current="true"] .library-meta')?.textContent,
+    }));
+    check('a live channel shows LIVE, drops the scrubber and plays',
+      live.clock === 'LIVE' && live.seekDisabled === true && live.playing === true,
+      JSON.stringify(live));
+  }
+
+  // Radio Browser: stations by tag, merged with a name search.
+  await page.getByRole('tab', { name: 'Radio' }).click();
+  await page.locator('#search').fill('jazz');
+  await page.waitForSelector('.result', { timeout: 30000 });
+  const radioRows = await page.locator('.result').count();
+  check('Radio Browser returns stations', radioRows > 0, `${radioRows} rows`);
+  if (radioRows) {
+    await page.locator('.result').first().click();
+    await page.waitForTimeout(6000);
+    const station = await page.evaluate(() => ({
+      clock: document.getElementById('time-current').textContent,
+      playing: window.__wax.player.playing(),
+    }));
+    check('a station cues, reports itself live and plays',
+      station.clock === 'LIVE' && station.playing === true, JSON.stringify(station));
   }
 
   // The equaliser panel opens and has ten bands.

@@ -15,6 +15,7 @@ import { activeIndex, parseLrc } from './lrc.js';
 import { dominantColor, ensureOnPaper, css } from './color.js';
 import { BANDS, PRESETS, clampGain } from './eq.js';
 import { SOURCES, search, resolve as resolveSource } from './sources.js';
+import { searchLyrics, asLrc } from './lyrics.js';
 import { Player } from './player.js';
 import { BARS, binsFor } from './viz.js';
 import * as q from './queue.js';
@@ -64,6 +65,9 @@ const el = {
 
 const DEMO = { name: 'Waxwing — Glass.mp3', url: 'demo/demo.mp3', lyrics: 'demo/demo.lrc' };
 const STORE_KEY = 'waxwing.settings.v3';
+
+/** Live radio has no end and no length: the transport says so instead of lying. */
+const isLive = () => Boolean(currentTrack()?.live);
 
 const state = {
   tracks: new Map(),
@@ -207,6 +211,7 @@ function addTrack(input) {
     cover: input.cover || '',
     duration: input.duration || 0,
     format: input.format || '',
+    live: Boolean(input.live),
     local: Boolean(input.local),
     demo: Boolean(input.demo),
   };
@@ -249,7 +254,7 @@ function renderLibrary() {
 
     const meta = document.createElement('span');
     meta.className = 'library-meta';
-    meta.textContent = track.duration ? clock(track.duration) : '';
+    meta.textContent = track.live ? 'live' : (track.duration ? clock(track.duration) : '');
 
     button.append(indexEl, text, meta);
     li.append(button);
@@ -270,6 +275,10 @@ function selectTrack(id, { play = true } = {}) {
   el.titleGhost.textContent = track.title;
   el.subtitle.textContent = [track.artist, track.album].filter(Boolean).join(' · ')
     || 'unknown artist';
+
+  // Radio has no position and no length; a scrubber that cannot move is worse
+  // than no scrubber.
+  el.seek.disabled = Boolean(track.live);
 
   if (track.cover) accentFromImage(track.cover);
   else setAccent(null);
@@ -375,7 +384,7 @@ function renderResults() {
     const badge = document.createElement('span');
     badge.className = 'result-badge';
     badge.dataset.mode = SOURCES[item.source]?.mode || 'web';
-    badge.textContent = SOURCES[item.source]?.label || item.source;
+    badge.textContent = `${item.live ? 'live · ' : ''}${SOURCES[item.source]?.label || item.source}`;
 
     button.append(indexEl, text, badge);
     button.addEventListener('click', () => cue(item));
@@ -512,14 +521,44 @@ function rememberLyrics(fileName, text) {
 }
 
 function loadLyricsFor(track) {
-  const text = state.lyricsByBase.get(baseName(track.title));
-  state.lyrics = text ? parseLrc(text).lines : null;
+  const local = state.lyricsByBase.get(baseName(track.title));
+  if (local) {
+    showLyrics(local);
+    return;
+  }
+
+  // No file beside the audio: ask LRClib. A live station has no fixed track,
+  // so there is nothing to look up.
+  showLyrics(null);
+  if (!track.live) fetchLyrics(track);
+}
+
+let lyricsToken = 0;
+async function fetchLyrics(track) {
+  const token = ++lyricsToken;
+  try {
+    const entry = await searchLyrics({
+      track: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration: track.duration,
+    });
+    if (token !== lyricsToken) return; // a newer track has taken over
+    showLyrics(entry ? asLrc(entry) : null);
+  } catch {
+    if (token === lyricsToken) showLyrics(null);
+  }
+}
+
+function showLyrics(text) {
+  const lines = text ? parseLrc(text).lines : null;
+  state.lyrics = lines;
   state.lastLyric = -1;
 
-  el.lyrics.hidden = !state.lyrics?.length;
+  el.lyrics.hidden = !lines?.length;
   el.lyricsLines.replaceChildren();
-  if (state.lyrics?.length) {
-    for (const line of state.lyrics) {
+  if (lines?.length) {
+    for (const line of lines) {
       const li = document.createElement('li');
       li.textContent = line.text || '♪';
       el.lyricsLines.append(li);
@@ -662,9 +701,11 @@ function tick() {
   if (!state.seeking) {
     const time = player.time();
     const duration = player.duration();
-    el.timeCurrent.textContent = clock(time);
-    el.timeTotal.textContent = clock(duration);
-    if (duration) {
+    const live = isLive();
+
+    el.timeCurrent.textContent = live ? 'LIVE' : clock(time);
+    el.timeTotal.textContent = live ? '' : clock(duration);
+    if (duration && !live) {
       el.seek.value = String(Math.round((time / duration) * 1000));
       el.seek.style.setProperty('--progress', `${(time / duration) * 100}%`);
     }

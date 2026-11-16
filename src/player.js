@@ -96,26 +96,42 @@ export class Player {
   load(track, { autoplay = true } = {}) {
     this.unload();
     this.track = track;
-    this.handlers.onMode?.(this.trackMode);
+    this._makeHowl({ html5: this.trackMode === 'html5', autoplay });
+    return this.howl;
+  }
 
-    const format = track.format || 'mp3';
-    const html5 = this.trackMode === 'html5';
+  /**
+   * Build the Howl. A Web Audio sound whose stream sends no CORS header cannot
+   * be decoded at all, so the first load failure retries once as a plain
+   * element: the same sound, minus the equaliser and the spectrum, rather than
+   * nothing. Radio stations are hit and miss on CORS, which is why this lives
+   * here rather than in each source.
+   */
+  _makeHowl({ html5, autoplay, retried = false }) {
+    const track = this.track;
+    this.handlers.onMode?.(html5 ? 'html5' : this.trackMode);
 
     this.howl = new Howl({
       src: [track.url],
-      format: [format],
+      format: [track.format || 'mp3'],
       html5,
       preload: true,
       volume: this.volume,
       onload: () => this.handlers.onReady?.(this.duration()),
-      onloaderror: (_id, error) => this.handlers.onError?.(`could not load that audio (${error ?? 'unknown error'})`),
+      onloaderror: (_id, error) => {
+        if (!html5 && !retried) {
+          this._makeHowl({ html5: true, autoplay: true, retried: true });
+          return;
+        }
+        this.handlers.onError?.(`could not load that audio (${error ?? 'unknown error'})`);
+      },
       onplayerror: (_id, error) => this.handlers.onError?.(`playback was refused (${error ?? 'unknown error'})`),
       onend: () => {
         this.handlers.onEnded?.();
       },
     });
 
-    if (this.trackMode === 'web') this._ensureGraph();
+    if (!html5) this._ensureGraph();
     if (autoplay) this.play();
     return this.howl;
   }

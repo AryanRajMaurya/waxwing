@@ -35,12 +35,17 @@ Two places it lives, from the same tree:
   (30″ previews), the Internet Archive (full-length, performer-permitted and
   Creative Commons), and NCS (full-length, free to use). Every row is labelled
   with the source and with what that source can honestly do.
+- **Live radio, two directories.** SomaFM's 51 curated channels, and Radio
+  Browser's community directory of 30,000+ stations — searchable by name, tag or
+  genre. Live means live: the transport reads `LIVE`, there is no position and no
+  length, and the scrubber steps aside.
 - **Your own files.** MP3, FLAC, OGG, Opus, M4A, WAV — picker or drag-and-drop.
   ID3v2 tags and the embedded cover are read from the first megabyte, so a big
   FLAC does not stall the page.
-- **Lyrics.** Drop a `.lrc` beside its audio, or into the same drop. Timestamps,
-  `[offset:]`, multiple stamps per line and the `[ti:]`/`[ar:]` headers are
-  handled; the active line is lifted out and follows the clock.
+- **Lyrics.** A `.lrc` beside its audio still wins, and when there is none the
+  player asks [LRClib](https://lrclib.net) for the track — synced lines when it
+  has them, and among candidates the closest duration, because a karaoke mix and
+  a single share a title.
 - **Ten-band equaliser.** 32 Hz to 16 kHz, flat/warm/vocal/night presets, and a
   preamp that moves opposite to the largest boost so nothing clips.
 - **A spectrum that reads like one.** 56 logarithmically spaced bands from 40 Hz
@@ -58,7 +63,8 @@ Nothing is bundled except Howler. The modules are plain ES modules:
 
 | File | Job |
 |---|---|
-| `src/sources.js` | The four catalogues, and the honest limits of each |
+| `src/sources.js` | The catalogues and the radio directories, and each one's limits |
+| `src/lyrics.js` | LRClib search, and choosing between its candidates |
 | `src/player.js` | Howler transport, and the one reroute that hangs an EQ off it |
 | `src/eq.js` | The ten filters, presets, preamp |
 | `src/viz.js` | Spectrum geometry (log-spaced bands, tiled bin edges) |
@@ -88,7 +94,16 @@ The EQ and the visualiser then apply to every Web Audio sound.
 | Apple | JSONP | CORS `*`, M4A | yes |
 | Internet Archive | `fetch`, CORS `*` | CORS `*` | yes |
 | NCS | local catalogue, no network | S3, **no CORS header** | no — HTML5 mode |
+| SomaFM | `channels.json`, cached | CORS `*`, but live | no — HTML5 mode |
+| Radio Browser | two `fetch`es, name and tag, merged | any, and live | no — HTML5 mode |
 | Your files | — | blob URL, same-origin | yes |
+
+**Live radio is HTML5, deliberately.** Howler's Web Audio path fetches the whole
+sound with XHR before it plays, and a live stream never finishes downloading —
+so it buffers forever without ever reporting an error. A plain media element
+plays a live stream, which is why every radio source is `mode: 'html5'`. The
+equaliser and the spectrum are off for those rows, and the UI says so rather
+than showing a spectrum that cannot exist.
 
 NCS is the one compromise. `ncs.io` has no public API and its S3 bucket refuses
 listing, so `tools/scrape-ncs.py` freezes the library into `catalog/ncs.json`
@@ -109,8 +124,8 @@ grainient.supply, reelfolio.io.
 ## Tests
 
 ```bash
-npm test                          # 62 unit tests, node --test, no dependencies
-node tools/verify-ui.mjs          # 18 browser checks; needs the server running
+npm test                          # 72 unit tests, node --test, no dependencies
+node tools/verify-ui.mjs          # 23 browser checks; needs the server running
 python3 tools/scrape-ncs.py       # regenerate catalog/ncs.json
 ```
 

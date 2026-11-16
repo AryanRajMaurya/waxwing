@@ -63,9 +63,21 @@ export const SOURCES = {
     mode: 'html5',
     placeholder: 'Search the NCS library',
   },
+  somafm: {
+    label: 'SomaFM',
+    note: '51 curated live channels · no equaliser (live streams are HTML5)',
+    mode: 'html5',
+    placeholder: 'Search SomaFM channels',
+  },
+  radio: {
+    label: 'Radio',
+    note: '30,000+ live stations · no equaliser (live streams are HTML5)',
+    mode: 'html5',
+    placeholder: 'Search stations by name, tag or genre',
+  },
 };
 
-export const SOURCE_ORDER = ['deezer', 'archive', 'itunes', 'ncs'];
+export const SOURCE_ORDER = ['deezer', 'archive', 'itunes', 'ncs', 'somafm', 'radio'];
 
 /** Grow a Deezer cover from the size it hands out to the size the frame takes. */
 function deezerCover(url, size = 512) {
@@ -268,6 +280,112 @@ export async function searchNcs(term) {
     `${track.title} ${track.artist}`.toLowerCase().includes(needle));
 }
 
+/* ── SomaFM ── */
+
+const SOMAFM_CHANNELS = 'https://somafm.com/channels.json';
+
+let somafmCache = null;
+
+/** SomaFM's channel list: title, genre, artwork and a playlist per channel. */
+export async function loadSomafm() {
+  if (somafmCache) return somafmCache;
+  const response = await fetch(SOMAFM_CHANNELS);
+  if (!response.ok) throw new Error(`SomaFM answered ${response.status}`);
+  const data = await response.json();
+
+  somafmCache = (data?.channels || []).map((channel) => ({
+    source: 'somafm',
+    id: `sf${channel.id}`,
+    title: channel.title || channel.id,
+    artist: 'SomaFM',
+    album: channel.genre || '',
+    cover: channel.largeimage || channel.image || '',
+    description: channel.description || '',
+    // Resolved on cue: the playlist is a plain text file, and fetching 51 of
+    // them to show a list would be 51 requests for one played song.
+    pls: (channel.playlists || []).find((p) => p.format === 'mp3')?.url
+      || channel.playlists?.[0]?.url
+      || '',
+    live: true,
+    url: '',
+  }));
+  return somafmCache;
+}
+
+/** The stream URLs out of a `.pls` playlist body. */
+export function parsePls(text) {
+  const urls = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    const match = line.match(/^File\d+\s*=\s*(\S+)/i);
+    if (match) urls.push(match[1]);
+  }
+  return urls;
+}
+
+/** Fetch a channel's playlist and take its first stream. */
+export async function resolveSomafm(item) {
+  const response = await fetch(item.pls);
+  if (!response.ok) throw new Error(`the playlist answered ${response.status}`);
+  const urls = parsePls(await response.text());
+  if (!urls.length) throw new Error('that channel has no stream');
+  return { ...item, url: urls[0] };
+}
+
+export async function searchSomafm(term) {
+  const all = await loadSomafm();
+  const needle = term.trim().toLowerCase();
+  if (!needle) return all;
+  return all.filter((channel) =>
+    `${channel.title} ${channel.album} ${channel.description}`.toLowerCase().includes(needle));
+}
+
+/* ── Radio Browser ── */
+
+/**
+ * Radio Browser is a community directory of internet radio: no key, CORS `*`.
+ * The stations answer in minutes, so a search runs twice — once on the name,
+ * once on the tag — and merges, which is what makes "jazz" and "smooth jazz"
+ * both land.
+ */
+const RADIO_BROWSER = 'https://de1.api.radio-browser.info';
+
+async function radioBrowserSearch(params) {
+  const response = await fetch(`${RADIO_BROWSER}/json/stations/search?${params}`);
+  if (!response.ok) throw new Error(`Radio Browser answered ${response.status}`);
+  return response.json();
+}
+
+export async function searchRadiobrowser(term, { limit = 30 } = {}) {
+  const base = { order: 'votes', reverse: 'true', hidebroken: 'true' };
+  const [byName, byTag] = await Promise.all([
+    radioBrowserSearch(new URLSearchParams({ ...base, name: term, limit: String(limit) })),
+    radioBrowserSearch(new URLSearchParams({ ...base, tag: term, limit: String(limit) })),
+  ]);
+
+  const seen = new Set();
+  const rows = [];
+  for (const station of [...byName, ...byTag]) {
+    if (!station?.stationuuid || seen.has(station.stationuuid)) continue;
+    if (!station.url_resolved) continue;
+    seen.add(station.stationuuid);
+    rows.push({
+      source: 'radio',
+      id: `rb${station.stationuuid}`,
+      title: station.name,
+      artist: station.country || 'radio',
+      album: String(station.tags || '').split(',').slice(0, 3).join(', '),
+      cover: station.favicon || '',
+      url: station.url_resolved,
+      tags: station.tags || '',
+      codec: station.codec || '',
+      bitrate: Number(station.bitrate) || 0,
+      votes: Number(station.votes) || 0,
+      live: true,
+    });
+  }
+  return rows;
+}
+
 /* ── dispatch ──────────────────────────────────────────────────────────── */
 
 /**
@@ -283,6 +401,14 @@ export async function search(source, term, { limit = 30, signal } = {}) {
       if (signal?.aborted) return [];
       return searchNcs(term);
     }
+    case 'somafm': {
+      if (signal?.aborted) return [];
+      return searchSomafm(term);
+    }
+    case 'radio': {
+      if (signal?.aborted) return [];
+      return searchRadiobrowser(term, { limit });
+    }
     default: throw new Error(`unknown source: ${source}`);
   }
 }
@@ -290,5 +416,6 @@ export async function search(source, term, { limit = 30, signal } = {}) {
 /** Turn a search row into something playable, resolving lazy sources. */
 export async function resolve(item) {
   if (item.source === 'archive' && !item.url) return resolveArchive(item);
+  if (item.source === 'somafm' && !item.url) return resolveSomafm(item);
   return item;
 }
