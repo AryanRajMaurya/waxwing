@@ -6,7 +6,7 @@
   "description": "A static web music player: Deezer, Internet Archive, Apple and NCS, plus your own files. No build step, no account, no upload.",
   "license": "MIT",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.js",
     "serve": "python3 -m http.server 8000 --bind 127.0.0.1",
     "catalog:ncs": "python3 tools/scrape-ncs.py"
   },
