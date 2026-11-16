@@ -22,7 +22,7 @@ Two places it lives, from the same tree:
 - **GitHub Pages** — `AryanRajMaurya/waxwing`, at
   https://aryanrajmaurya.github.io/waxwing/. Push through the mirror clone at
   `~/waxwing-publish` (see the waxwing skill's `references/player-project.md`).
-- **Antideploy** — the app `hermes`, at https://hermes.antideploy.app.
+- **Antideploy** — the app `hermes`, published at https://waxwing.antideploy.app.
   `.antideploy.json` holds the application id; deploy with
   `tar czf - . | curl -X POST "https://antideploy.com/api/v1/deploy?applicationId=<id>" -H "Authorization: Bearer $TOKEN" -F "archive=@-"`.
 
