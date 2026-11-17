@@ -170,10 +170,6 @@ try {
       playing: window.__wax.player.playing(),
       meta: document.querySelector('.library-item[aria-current="true"] .library-meta')?.textContent,
     }));
-    // SomaFM refuses requests whose Referer is a github.io page, so the rows
-    // cue and report LIVE there but never play. That is their block, not a
-    // defect in the player, and it does not apply to any other origin.
-    const playsHere = !new URL(BASE).hostname.endsWith('github.io');
     // Playback is asserted on the Radio Browser check below: SomaFM's live
     // streams start in about a second from some networks and not inside half a
     // minute from others, and github.io is refused outright. The cue is the
