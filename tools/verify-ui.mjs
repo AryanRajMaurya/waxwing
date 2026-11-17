@@ -139,6 +139,11 @@ try {
 
   // NCS plays in HTML5 mode, and the UI says so.
   await page.getByRole('tab', { name: 'NCS' }).click();
+  const ncsCount = await page.evaluate(async () => {
+    const response = await fetch('catalog/ncs.json');
+    return (await response.json()).count;
+  });
+  check('the NCS catalogue is the full library, not the truncated one', ncsCount >= 1500, `${ncsCount} tracks`);
   await page.locator('#search').fill('sky');
   await page.waitForSelector('.result', { timeout: 20000 }).catch(() => {});
   const ncsRows = await page.locator('.result').count();
@@ -148,6 +153,25 @@ try {
     await page.waitForTimeout(1500);
     const mode = await page.evaluate(() => document.body.dataset.mode);
     check('NCS is labelled as HTML5 playback', mode === 'html5', `data-mode=${mode}`);
+  }
+
+  // Wikimedia Commons: full-length public domain and CC recordings.
+  await page.getByRole('tab', { name: 'Commons' }).click();
+  await page.locator('#search').fill('beethoven');
+  await page.waitForSelector('.result', { timeout: 30000 });
+  const commonsRows = await page.locator('.result').count();
+  check('Wikimedia Commons returns audio', commonsRows > 0, `${commonsRows} rows`);
+  if (commonsRows) {
+    const previous = await page.locator('#title-text').textContent();
+    await page.locator('.result').first().click();
+    await waitFor(page, (prev) => document.getElementById('title-text').textContent !== prev,
+      30000, 500, previous);
+    await waitFor(page, () => window.__wax.player.playing(), 30000);
+    const recording = await page.evaluate(() => ({
+      clock: document.getElementById('time-current').textContent,
+      playing: window.__wax.player.playing(),
+    }));
+    check('a Commons recording plays', recording.playing === true, JSON.stringify(recording));
   }
 
   // SomaFM: a live channel, resolved from its playlist, with no scrubber.

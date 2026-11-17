@@ -37,10 +37,12 @@ blocked and plays on Pages.
 
 ## What it does
 
-- **Four catalogues, no keys.** Deezer (30″ MP3 previews, cover art), Apple
+- **Five catalogues, no keys.** Deezer (30″ MP3 previews, cover art), Apple
   (30″ previews), the Internet Archive (full-length, performer-permitted and
-  Creative Commons), and NCS (full-length, free to use). Every row is labelled
-  with the source and with what that source can honestly do.
+  Creative Commons), NCS (the whole library — 1,997 tracks, free to use) and
+  Wikimedia Commons (public-domain and CC recordings: classical, jazz, field
+  recordings). Every row is labelled with the source and with what that source
+  can honestly do.
 - **Live radio, two directories.** SomaFM's 51 curated channels, and Radio
   Browser's community directory of 30,000+ stations — searchable by name, tag or
   genre. Live means live: the transport reads `LIVE`, there is no position and no
@@ -100,6 +102,7 @@ The EQ and the visualiser then apply to every Web Audio sound.
 | Apple | JSONP | CORS `*`, M4A | yes |
 | Internet Archive | `fetch`, CORS `*` | CORS `*` | yes |
 | NCS | local catalogue, no network | S3, **no CORS header** | no — HTML5 mode |
+| Wikimedia Commons | two `fetch`es: search, then file info | CORS `*` | yes |
 | SomaFM | `channels.json`, cached | CORS `*`, but live | no — HTML5 mode |
 | Radio Browser | two `fetch`es, name and tag, merged | any, and live | no — HTML5 mode |
 | Your files | — | blob URL, same-origin | yes |
@@ -112,8 +115,11 @@ equaliser and the spectrum are off for those rows, and the UI says so rather
 than showing a spectrum that cannot exist.
 
 NCS is the one compromise. `ncs.io` has no public API and its S3 bucket refuses
-listing, so `tools/scrape-ncs.py` freezes the library into `catalog/ncs.json`
-(234 tracks, regenerated on demand) and the player loads that static file. The
+listing, so `tools/scrape-ncs.py` freezes the whole library into
+`catalog/ncs.json` — 1,997 tracks at the time of writing, from 103 pages, with
+the cover and stream URL of each — and the player loads that static file. Run
+`python3 tools/scrape-ncs.py --pages 200` again to pick up new releases; the
+scraper stops by itself when two pages come back empty. The
 audio host sends no CORS header, so those tracks play in HTML5 mode: full sound,
 no equaliser, and the UI says so rather than quietly pretending otherwise.
 
@@ -130,8 +136,8 @@ grainient.supply, reelfolio.io.
 ## Tests
 
 ```bash
-npm test                          # 72 unit tests, node --test, no dependencies
-node tools/verify-ui.mjs          # 23 browser checks; needs the server running
+npm test                          # 77 unit tests, node --test, no dependencies
+node tools/verify-ui.mjs          # 26 browser checks; needs the server running
 python3 tools/scrape-ncs.py       # regenerate catalog/ncs.json
 ```
 

@@ -75,9 +75,15 @@ export const SOURCES = {
     mode: 'html5',
     placeholder: 'Search stations by name, tag or genre',
   },
+  commons: {
+    label: 'Commons',
+    note: 'Wikimedia · public domain & CC audio · equaliser applies',
+    mode: 'web',
+    placeholder: 'Search Wikimedia Commons audio',
+  },
 };
 
-export const SOURCE_ORDER = ['deezer', 'archive', 'itunes', 'ncs', 'somafm', 'radio'];
+export const SOURCE_ORDER = ['deezer', 'archive', 'itunes', 'ncs', 'commons', 'somafm', 'radio'];
 
 /** Grow a Deezer cover from the size it hands out to the size the frame takes. */
 function deezerCover(url, size = 512) {
@@ -386,6 +392,95 @@ export async function searchRadiobrowser(term, { limit = 30 } = {}) {
   return rows;
 }
 
+/* ── Wikimedia Commons ── */
+
+/**
+ * Wikimedia Commons audio: public domain and Creative Commons recordings, from
+ * a century of classical performance to field recordings. The search API and
+ * the file host both send `Access-Control-Allow-Origin: *`, so these take the
+ * Web Audio path and the equaliser applies. There is no cover art for an audio
+ * file, so rows carry none rather than a generic icon.
+ */
+const COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
+
+/** Formats the browser can actually decode; Commons also holds .mid and .webm video. */
+const COMMONS_AUDIO = new Set(['ogg', 'oga', 'mp3', 'wav', 'flac', 'opus', 'm4a', 'aac']);
+
+export function commonsSearchUrl(term, limit = 30) {
+  const params = new URLSearchParams({
+    action: 'query',
+    list: 'search',
+    srsearch: `filetype:audio ${term}`,
+    srnamespace: '6',
+    srlimit: String(limit),
+    format: 'json',
+    origin: '*',
+  });
+  return `${COMMONS_API}?${params}`;
+}
+
+/** Strip the markup Commons puts in its extmetadata text fields. */
+export function stripMarkup(value) {
+  return String(value || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** Drop the tracking query Commons appends to file URLs. */
+export function cleanFileUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+export async function searchCommons(term, { limit = 30 } = {}) {
+  const response = await fetch(commonsSearchUrl(term, limit));
+  if (!response.ok) throw new Error(`Wikimedia answered ${response.status}`);
+  const data = await response.json();
+  const titles = (data?.query?.search || []).map((row) => row.title).filter(Boolean);
+  if (!titles.length) return [];
+
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: titles.slice(0, limit).join('|'),
+    prop: 'imageinfo',
+    iiprop: 'url|size|extmetadata',
+    format: 'json',
+    origin: '*',
+  });
+  const infoResponse = await fetch(`${COMMONS_API}?${params}`);
+  if (!infoResponse.ok) throw new Error(`Wikimedia answered ${infoResponse.status}`);
+  const info = await infoResponse.json();
+
+  const rows = [];
+  for (const page of Object.values(info?.query?.pages || {})) {
+    const image = page?.imageinfo?.[0];
+    if (!image?.url) continue;
+
+    const meta = image.extmetadata || {};
+    // The extension has to come off the path: the URL's query string contains
+    // dots of its own, and splitting the whole thing yields "org&utm_content=…".
+    const url = cleanFileUrl(image.url);
+    const format = (url.split('.').pop() || '').toLowerCase();
+    if (!COMMONS_AUDIO.has(format)) continue;
+
+    rows.push({
+      source: 'commons',
+      id: `wc${page.pageid}`,
+      title: String(page.title || '').replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, ''),
+      artist: stripMarkup(meta.Artist?.value) || 'Wikimedia Commons',
+      album: stripMarkup(meta.LicenseShortName?.value) || '',
+      url,
+      cover: '',
+      duration: Math.round(Number(image.duration)) || 0,
+      format,
+      live: false,
+    });
+  }
+  return rows;
+}
+
 /* ── dispatch ──────────────────────────────────────────────────────────── */
 
 /**
@@ -408,6 +503,10 @@ export async function search(source, term, { limit = 30, signal } = {}) {
     case 'radio': {
       if (signal?.aborted) return [];
       return searchRadiobrowser(term, { limit });
+    }
+    case 'commons': {
+      if (signal?.aborted) return [];
+      return searchCommons(term, { limit });
     }
     default: throw new Error(`unknown source: ${source}`);
   }
