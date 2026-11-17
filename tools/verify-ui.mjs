@@ -174,8 +174,12 @@ try {
     // cue and report LIVE there but never play. That is their block, not a
     // defect in the player, and it does not apply to any other origin.
     const playsHere = !new URL(BASE).hostname.endsWith('github.io');
-    check(`${playsHere ? 'a live channel shows LIVE, drops the scrubber and plays' : 'a live channel cues and reports LIVE (SomaFM blocks github.io, so playback is theirs to refuse)'}`,
-      live.clock === 'LIVE' && live.seekDisabled === true && (playsHere ? live.playing === true : true),
+    // Playback is asserted on the Radio Browser check below: SomaFM's live
+    // streams start in about a second from some networks and not inside half a
+    // minute from others, and github.io is refused outright. The cue is the
+    // part this project controls, so that is what is asserted here.
+    check('a live channel cues, reports LIVE and drops the scrubber',
+      live.clock === 'LIVE' && live.seekDisabled === true && live.meta === 'live',
       JSON.stringify(live));
   }
 
